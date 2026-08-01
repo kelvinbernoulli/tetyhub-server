@@ -1,0 +1,99 @@
+{
+    "$schema": "https://json.schemastore.org/package.json",
+    "name": "tetyhub-server",
+    "version": "1.0.0",
+    "description": "",
+    "main": "index.js",
+    "type": "module",
+    "scripts": {
+        "dev": "cross-env NODE_ENV=development nodemon ./index.js",
+        "demo": "cross-env NODE_ENV=demo nodemon ./index.js",
+        "start": "cross-env NODE_ENV=production node ./index.js",
+        "format": "prettier --write .",
+        "migrate": "npx prisma migrate dev",
+        "migrate:deploy": "npx prisma migrate deploy",
+        "migrate:create": "npx prisma migrate dev --create-only",
+        "migrate:status": "npx prisma migrate status",
+        "migrate:reset": "npx prisma migrate reset",
+        "migrate:resolve": "npx prisma migrate resolve",
+        "seed": "node prisma/seed.js",
+        "db:pull": "npx prisma db pull",
+        "db:push": "npx prisma db push",
+        "generate": "npx prisma generate",
+        "studio": "npx prisma studio",
+        "prisma:format": "npx prisma format",
+        "prisma:validate": "npx prisma validate"
+    },
+    "prettier": {
+        "printWidth": 80,
+        "tabWidth": 4,
+        "singleQuote": true,
+        "trailingComma": "es5"
+    },
+    "prisma": {
+        "seed": "node prisma/seed.js"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/kelvinbernoulli/tetyhub-server.git"
+    },
+    "keywords": [],
+    "author": "",
+    "license": "ISC",
+    "bugs": {
+        "url": "https://github.com/kelvinbernoulli/tetyhub-server/issues"
+    },
+    "homepage": "https://github.com/kelvinbernoulli/tetyhub-server#readme",
+    "dependencies": {
+        "@aws-sdk/client-s3": "^3.1079.0",
+        "@aws-sdk/lib-storage": "^3.1079.0",
+        "@prisma/adapter-pg": "^7.8.0",
+        "@prisma/client": "^7.8.0",
+        "axios": "^1.13.2",
+        "base-64": "^1.0.0",
+        "bcrypt": "^6.0.0",
+        "bcryptjs": "^3.0.3",
+        "body-parser": "^2.2.2",
+        "connect-redis": "^9.0.0",
+        "cookie-parser": "^1.4.7",
+        "cors": "^2.8.5",
+        "dotenv": "^17.2.3",
+        "express": "^5.2.1",
+        "express-rate-limit": "^8.2.1",
+        "express-session": "^1.18.2",
+        "express-validator": "^7.3.1",
+        "helmet": "^8.1.0",
+        "hi-base32": "^0.5.1",
+        "joi": "^18.2.1",
+        "mime-types": "^3.0.2",
+        "morgan": "^1.10.1",
+        "node-cron": "^4.6.0",
+        "nodemailer": "^9.0.0",
+        "nodemon": "^3.1.11",
+        "passport": "^0.7.0",
+        "passport-google-oauth20": "^2.0.0",
+        "pg": "^8.16.3",
+        "redis": "^5.12.1",
+        "slugify": "^1.6.9",
+        "stripe": "^22.4.0",
+        "ua-parser-js": "^2.0.7",
+        "url": "^0.11.4"
+    },
+    "imports": {
+        "#config/*": "./src/config/*",
+        "#controllers/*": "./src/controllers/*",
+        "#templates/*": "./src/templates/*",
+        "#middlewares/*": "./src/middlewares/*",
+        "#models/*": "./src/models/*",
+        "#routes/*": "./src/routes/*",
+        "#schemas/*": "./src/schemas/*",
+        "#services/*": "./src/services/*",
+        "#utils/*": "./src/utils/*",
+        "#prisma/*": "./src/generated/*"
+    },
+    "devDependencies": {
+        "cross-env": "^10.1.0",
+        "prettier": "^3.0.0",
+        "prisma": "^7.9.1"
+    }
+}

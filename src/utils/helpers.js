@@ -1,0 +1,198 @@
+import Crypto from 'crypto';
+import pkg from 'hi-base32';
+import bcrypt from "bcrypt";
+import { validationResult } from 'express-validator';
+const { encode } = pkg;
+
+// generate otp code
+export const generateOTP = async () => {
+    const min = 100000;
+    const max = 999999;
+    const code = Math.floor(Math.random() * (max - min + 1)) + min;
+    const now = new Date();
+
+    return { code, now };
+};
+
+// Define the password validation function
+export const validatePassword = (password) => {
+    const minLength = 8;
+    const hasUpperCase = /[A-Z]/.test(password);
+    const hasLowerCase = /[a-z]/.test(password);
+    const hasDigit = /[0-9]/.test(password);
+    const hasSpecialChar = /[!@#$%^&*(),.?":{}|<>]/.test(password);
+
+    return password.length >= minLength && hasUpperCase && hasLowerCase && hasDigit && hasSpecialChar;
+};
+
+// validate email
+export const isValidEmail = (email) => {
+    const validateEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return validateEmail.test(email);
+};
+
+export const generateBase32Secret = () => {
+    const buffer = Crypto.randomBytes(15);
+    const base32 = encode(buffer).replace(/=/g, "").substring(0, 24);
+    return base32;
+};
+
+//generate referral code
+export const generateReferralCode = () => {
+    const characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    let referralCode = "iDEAL-";
+    for (let i = 0; i < 9; i++) {
+        referralCode += characters.charAt(
+            Math.floor(Math.random() * characters.length)
+        );
+    }
+    return referralCode;
+};
+
+// generate password reset token
+export const generatePasswordResetToken = async () => {
+    const length = 10;
+    const characters =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_";
+    const charactersLength = characters.length;
+
+    let token = "";
+    for (let i = 0; i < length; i++) {
+        const randomIndex = crypto.randomInt(0, charactersLength);
+        token += characters[randomIndex];
+    }
+
+    const encryptedToken = await bcrypt.hash(token, 10);
+    return { encryptedToken, token };
+};
+
+export const passwordHash = async (password) => {
+    try {
+        if (!password) {
+            throw new Error("Password is required");
+        }
+
+        const salt = await bcrypt.genSalt(10);
+        const hash = await bcrypt.hash(password, salt);
+
+        return hash;
+    } catch (err) {
+        console.error("Error in passwordHash function:", err);
+        throw err;
+    }
+};
+
+export const verifyPassword = async (password, hashedPassword) => {
+    try {
+        const match = await bcrypt.compare(password, hashedPassword);
+        return match;
+    } catch (err) {
+        console.error("Error in verifypassword function:", err);
+        throw err;
+    }
+};
+
+export const validateRequest = (req, res, next) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        res.status(422).json({ errors: errors.array() });
+    }
+    return next()
+};
+
+const dialCodes = {
+    NG: "234",
+    UG: "256",
+    GH: "233",
+};
+
+const patterns = {
+    NG: /^(\+?234|0)[789][01]\d{8}$/,
+    UG: /^(\+?256|0)7\d{8}$/,
+    GH: /^(\+?233|0)[235]\d{8}$/,
+};
+
+export const normalizePhone = (phone, countryCode) => {
+    if (!phone) throw new Error("Phone is required");
+
+    const country = dialCodes[countryCode];
+    const pattern = patterns[countryCode];
+
+    if (!country || !pattern) {
+        throw new Error("Unsupported country. Use NG, UG, or GH");
+    }
+
+    // Normalize input (remove spaces only for validation flexibility)
+    const raw = phone.replace(/\s+/g, "");
+
+    // Validate original structure
+    if (!pattern.test(raw)) {
+        throw new Error("Invalid phone number for selected country");
+    }
+
+    // Remove all non-digits
+    let cleaned = raw.replace(/\D/g, "");
+
+    // If already starts with country code
+    if (cleaned.startsWith(country)) {
+        return `${cleaned}`;
+    }
+
+    // If starts with 0 → replace with country code
+    if (cleaned.startsWith("0")) {
+        return `${country}${cleaned.slice(1)}`;
+    }
+
+    // Fallback (rare due to validation)
+    return `${country}${cleaned}`;
+};
+
+export const base64ImagePattern = /^data:image\/(png|jpeg|jpg|pdf);base64,[A-Za-z0-9+/]+={0,2}$/;
+
+export const generateTicketNumber = () => {
+    const timestamp = Date.now().toString(36).toUpperCase();
+    const random = Crypto.randomBytes(4).toString('hex').toUpperCase();
+    return `TKT-${timestamp}${random}`;
+};
+
+export const buildRedisKey = (email, type, vendorId = null, userId = null) => {
+    const parts = ['otp'];
+    if (vendorId) parts.push(vendorId);
+    if (userId) parts.push(userId);
+    parts.push(email.toLowerCase());
+    parts.push(type);
+    return parts.join(':');
+};
+
+export const ROLES = {
+    VENDOR: parseInt(process.env.VENDOR_ROLE_ID),
+    CUSTOMER: parseInt(process.env.CUSTOMER_ROLE_ID),
+    VENDOR_ADMIN: parseInt(process.env.VENDOR_ADMIN_ROLE_ID),
+    ADMIN: parseInt(process.env.ADMIN_ROLE_ID),
+    SUPER_ADMIN: parseInt(process.env.SUPER_ADMIN_ROLE_ID)
+};
+
+export const adminDefaultPassword = () => {
+    const characters = '0123456789';
+    let adminDefaultPassword = 'Admin@';
+    for (let i = 0; i < 6; i++) {
+        adminDefaultPassword += characters.charAt(Math.floor(Math.random() * characters.length));
+    }
+    return adminDefaultPassword;
+}
+
+export const generateOrderReference = (orderId) => {
+    return `ORD-${orderId}-${Date.now()}`;
+};
+
+export const vendorID = (user) => {
+    let vendorId = null;
+    if (user.role === ROLES.VENDOR) {
+        vendorId = user.id;
+    } else if (user.role === ROLES.VENDOR_ADMIN) {
+        vendorId = user.vendor_id;
+    } else if (user.role === ROLES.CUSTOMER) {
+        vendorId = user.vendor_id;
+    }
+    return vendorId;
+}
