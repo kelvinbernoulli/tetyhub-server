@@ -8,6 +8,7 @@ export const registerSchema = Joi.object({
     firstname: Joi.string().trim().min(2).max(100).required().label("First name"),
     lastname: Joi.string().trim().min(2).max(100).required().label("Last name"),
     email: Joi.string().email().lowercase().required().label("Email"),
+    role: Joi.string().valid('customer', 'vendor').required().label("Role"),
     password: Joi.string()
         .pattern(passwordRegex)
         .required()
@@ -15,48 +16,12 @@ export const registerSchema = Joi.object({
         .messages({
             "string.pattern.base":
                 "Password must be at least 8 characters and include uppercase, lowercase, number, and special character.",
-        }),
-    phone: Joi.string()
-        .trim()
-        .pattern(phoneRegex)
-        .required()
-        .label("Phone")
-        .messages({
-            "string.pattern.base":
-                "Phone must be a valid international number format.",
-        }),
-    country_id: Joi.number().integer().positive().required().label("Country ID"),
-});
-
-export const customerRegisterSchema = Joi.object({
-    firstname: Joi.string().trim().min(2).max(100).required().label("First name"),
-    lastname: Joi.string().trim().min(2).max(100).required().label("Last name"),
-    email: Joi.string().email().lowercase().required().label("Email"),
-    password: Joi.string()
-        .pattern(passwordRegex)
-        .required()
-        .label("Password")
-        .messages({
-            "string.pattern.base":
-                "Password must be at least 8 characters and include uppercase, lowercase, number, and special character.",
-        }),
-    phone: Joi.string()
-        .trim()
-        .pattern(phoneRegex)
-        .required()
-        .label("Phone")
-        .messages({
-            "string.pattern.base":
-                "Phone must be a valid international number format.",
-        }),
-    country_id: Joi.number().integer().positive().required().label("Country ID"),
-    vendor_id: Joi.number().integer().positive().required().label("Vendor ID"),
+        })
 });
 
 export const loginSchema = Joi.object({
     email: Joi.string().email().lowercase().required().label("Email"),
-    password: Joi.string().required().label("Password"),
-    vendor_id: Joi.number().integer().positive().optional().label("Vendor ID"),
+    password: Joi.string().required().label("Password")
 });
 
 export const updateProfileSchema = Joi.object({

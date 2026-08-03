@@ -155,10 +155,8 @@ export const generateTicketNumber = () => {
     return `TKT-${timestamp}${random}`;
 };
 
-export const buildRedisKey = (email, type, vendorId = null, userId = null) => {
+export const buildRedisKey = (email, type) => {
     const parts = ['otp'];
-    if (vendorId) parts.push(vendorId);
-    if (userId) parts.push(userId);
     parts.push(email.toLowerCase());
     parts.push(type);
     return parts.join(':');

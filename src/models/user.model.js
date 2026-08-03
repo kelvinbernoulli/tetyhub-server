@@ -18,36 +18,15 @@ export class UserModel {
     };
 
     static async getUserByEmail(email) {
-        const queryText = `SELECT * FROM users WHERE email = $1 AND vendor_id IS NULL AND deleted_at IS NULL LIMIT 1`;
+        const queryText = `SELECT * FROM users WHERE email = $1 LIMIT 1`;
         const queryValues = [email];
         const queryResult = await pool.query(queryText, queryValues);
         return queryResult.rows[0] ?? null;
     };
 
     static async getUserByPhone(phone) {
-        const queryText = `SELECT * FROM users WHERE phone = $1 AND vendor_id IS NULL AND deleted_at IS NULL LIMIT 1`;
+        const queryText = `SELECT * FROM users WHERE phone = $1 LIMIT 1`;
         const queryValues = [phone];
-        const queryResult = await pool.query(queryText, queryValues);
-        return queryResult.rows[0] ?? null;
-    };
-
-    static async getUserByEmailAndRole(email, role) {
-        const queryText = `SELECT * FROM users WHERE email = $1 AND role = ANY($2) AND vendor_id IS NULL AND deleted_at IS NULL LIMIT 1`;
-        const queryValues = [email, role];
-        const queryResult = await pool.query(queryText, queryValues);
-        return queryResult.rows[0] ?? null;
-    };
-
-    static async getAdminUserByPhone(phone) {
-        const queryText = `SELECT * FROM users WHERE phone = $1 AND vendor_id IS NULL AND deleted_at IS NULL LIMIT 1`;
-        const queryValues = [phone];
-        const queryResult = await pool.query(queryText, queryValues);
-        return queryResult.rows[0] ?? null;
-    };
-
-    static async getAdminUserById(id) {
-        const queryText = `SELECT * FROM users WHERE id = $1 AND vendor_id IS NULL AND deleted_at IS NULL LIMIT 1`;
-        const queryValues = [id];
         const queryResult = await pool.query(queryText, queryValues);
         return queryResult.rows[0] ?? null;
     };
@@ -61,21 +40,6 @@ export class UserModel {
             return null;
         }
     };
-
-    static async getCountryById(countryId) {
-        try {
-            const query = `SELECT * FROM countries WHERE id = $1`;
-            const result = await pool.query(query, [countryId]);
-            if (result.rowCount > 0) {
-                return result.rows[0];
-            } else {
-                throw new Error("Country not found");
-            }
-        } catch (error) {
-            console.error("Error fetching country by ID:", error);
-            throw new Error("Error fetching country by ID");
-        }
-    }
 
     static async phoneExists(phone) {
         try {
@@ -94,8 +58,8 @@ export class UserModel {
 
             await client.query(
                 `UPDATE users 
-            SET admin_role = $1::integer[], updated_at = NOW()
-            WHERE id = $2 AND deleted_at IS NULL`,
+                SET admin_role = $1::integer[], updated_at = NOW()
+                WHERE id = $2 AND deleted_at IS NULL`,
                 [adminRoles, adminId]
             );
 
@@ -103,14 +67,14 @@ export class UserModel {
                 console.log("Inserting permission for adminTypeId:", parseInt(adminTypeId), "perms:", perms);
                 const result = await client.query(
                     `INSERT INTO admin_permissions (admin_id, admin_type_id, can_create, can_read, can_update, can_delete)
-                VALUES ($1, $2, $3, $4, $5, $6)
-                ON CONFLICT (admin_id, admin_type_id)
-                DO UPDATE SET
-                    can_create  = EXCLUDED.can_create,
-                    can_read    = EXCLUDED.can_read,
-                    can_update  = EXCLUDED.can_update,
-                    can_delete  = EXCLUDED.can_delete,
-                    updated_at  = NOW()`,
+                    VALUES ($1, $2, $3, $4, $5, $6)
+                    ON CONFLICT (admin_id, admin_type_id)
+                    DO UPDATE SET
+                        can_create  = EXCLUDED.can_create,
+                        can_read    = EXCLUDED.can_read,
+                        can_update  = EXCLUDED.can_update,
+                        can_delete  = EXCLUDED.can_delete,
+                        updated_at  = NOW()`,
                     [
                         adminId,
                         parseInt(adminTypeId),
@@ -120,7 +84,7 @@ export class UserModel {
                         perms.can_delete ?? false
                     ]
                 );
-            console.log("Permission upsert result:", result.rows[0]);
+                console.log("Permission upsert result:", result.rows[0]);
             }
 
             await client.query('COMMIT');
@@ -175,36 +139,13 @@ export class UserModel {
             const user = userResult.rows[0];
             const userId = user.id;
 
-            if (data.role === ROLES.VENDOR) {
-                await client.query(
-                    `INSERT INTO vendors (user_id) VALUES ($1)`,
-                    [userId]
-                );
-
-            } else if (data.role === ROLES.CUSTOMER) {
-                if (!vendorId) throw new Error('vendorId is required for customer registration.');
-
-                await client.query(
-                    `INSERT INTO users_info (user_id, vendor_id) VALUES ($1, $2)`,
-                    [userId, vendorId]
-                );
-
-            } else if (data.role === ROLES.VENDOR_ADMIN) {
-                if (!vendorId) throw new Error('vendorId is required for vendor admin registration.');
-                await client.query(
-                    `INSERT INTO admins (user_id, vendor_id) VALUES ($1, $2)`,
-                    [userId, vendorId]
-                );
-
-            } else if (data.role === ROLES.ADMIN) {
+            if (data.role === ROLES.ADMIN) {
                 await client.query(
                     `INSERT INTO admins (user_id) VALUES ($1)`,
                     [userId]
                 );
                 // await 
 
-            } else {
-                throw new Error(`Unrecognised role: ${data.role}`);
             }
 
             await client.query('COMMIT');

@@ -5,24 +5,20 @@ import { buildRedisKey, generateOTP, ROLES } from "#utils/helpers.js";
 import { sendAdminRegistrationEmail, sendEmailVerificationLink, sendPasswordResetLink } from "./mail.model.js";
 import { select_by_keys } from "./query.model.js";
 import { config } from "dotenv";
-
 config();
 
-
-
 export class Auth {
-    static async activateAccount(userId, vendorId) {
+    static async activateAccount(email) {
         const { rows } = await pool.query(
             `SELECT u.id, u.email, u.role, u.email_verified
             FROM users u
-            WHERE u.id = $1
-            AND u.deleted_at IS NULL
+            WHERE u.email = $1
             LIMIT 1`,
-            [userId]
+            [email]
         );
 
         const user = rows[0];
-
+        console.log('user', user)
         if (!user) throw Object.assign(
             new Error('User not found'),
             { status: 404, code: 'USER_NOT_FOUND' }
@@ -35,44 +31,25 @@ export class Auth {
 
         const { code } = await generateOTP();
         const encryptedCode = encrypt(code.toString());
-        const encryptedUserId = encrypt(userId.toString());
 
         // Match buildRedisKey format
-        const redisKey = buildRedisKey(user.email, 'email_verification', vendorId, userId);
+        const redisKey = buildRedisKey(user.email, 'email_verification');
         await redisClient.set(redisKey, code.toString(), { EX: 300 });
 
-        // const baseUrl = vendorId
-        //     ? await getVendorBaseUrl(vendorId)
-        //     : process.env.DEV_URL;
-
-        // if (!baseUrl) throw new Error('Base URL is not defined');
-
-        const link = new URL('/v1/auth/verify-email', process.env.DEV_URL);
+        const link = new URL('/v1/api/auth/verify-email', process.env.DEV_URL);
         link.searchParams.set('token', encryptedCode);
         link.searchParams.set('email', user.email);
-        link.searchParams.set('userId', encryptedUserId);
-
-        // Only append vendorId if present
-        if (vendorId) {
-            const encryptedVendorId = encrypt(vendorId.toString());
-            link.searchParams.set('vendorId', encryptedVendorId);
-        }
-
-        const vendor = {
-            supportEmail: user.email,
-        };
         
-        await sendEmailVerificationLink(user, link.toString(), vendor);
+        await sendEmailVerificationLink(user, link.toString());
         console.log("Verification link:", link.toString());
         return { success: true, message: 'Verification email sent' };
     }
 
-    static async forgotPassword(userId, vendorId) {
+    static async forgotPassword(userId) {
         const { rows } = await pool.query(
             `SELECT u.id, u.email, u.role, u.email_verified
             FROM users u
             WHERE u.id = $1
-            AND u.deleted_at IS NULL
             LIMIT 1`,
             [userId]
         );
@@ -92,28 +69,11 @@ export class Auth {
         const redisKey = buildRedisKey(user.email, 'password_reset ', vendorId, userId);
         await redisClient.set(redisKey, code.toString(), { EX: 300 });
 
-        // const baseUrl = vendorId
-        //     ? await getVendorBaseUrl(vendorId)
-        //     : process.env.DEV_URL;
-
-        // if (!baseUrl) throw new Error('Base URL is not defined');
-
         const link = new URL('/v1/auth/password-reset/confirm', process.env.DEV_URL);
         link.searchParams.set('token', encryptedCode);
         link.searchParams.set('email', user.email);
-        link.searchParams.set('userId', encryptedUserId);
 
-        // Only append vendorId if present
-        if (vendorId) {
-            const encryptedVendorId = encrypt(vendorId.toString());
-            link.searchParams.set('vendorId', encryptedVendorId);
-        }
-
-        const vendor = {
-            supportEmail: user.email,
-        };
-
-        await sendPasswordResetLink(user, link.toString(), vendor);
+        await sendPasswordResetLink(user, link.toString());
         return { success: true, message: 'Password reset email sent' };
     }
 

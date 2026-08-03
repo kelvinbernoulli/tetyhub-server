@@ -1,15 +1,17 @@
-import { emailVerification } from "#templates/account.activation.js";
 import transporter from "#services/mail_transporter.js";
+import { emailVerification } from "#templates/account.activation.js";
 import { resetPassword } from "#templates/reset.password.js";
 // import { adminRegistration } from "#templates/admin.reg.js";
 // import { orderConfirmation } from "#templates/order.comfirmation.js";
+import { config } from "dotenv";
+config();
 
-export const sendEmailVerificationLink = async (user, verificationLink, vendor) => {
+export const sendEmailVerificationLink = async (user, verificationLink) => {
     let mailOptions = {
         from: process.env.EMAIL_USER,
         to: user.email,
         subject: 'Email Verification',
-        html: emailVerification(user, verificationLink, vendor)
+        html: emailVerification(user, verificationLink)
     };
 
     try {
@@ -92,11 +94,4 @@ export const sendOrderStatusEmail = async (user, order, vendor) => {
         console.error('Error sending order email:', error);
         return false
     }
-};
-
-export default {
-    sendEmailVerificationLink,
-    sendAdminRegistrationEmail,
-    sendPasswordResetLink,
-    sendOrderConfirmationEmail
 };

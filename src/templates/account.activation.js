@@ -1,6 +1,6 @@
 import { Footer, Header } from "./layout.js";
 
-export const emailVerification = (user, verificationLink, vendor) => {
+export const emailVerification = (user, verificationLink) => {
     return `
         ${Header()}
 
