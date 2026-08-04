@@ -14,5 +14,7 @@ router.post("/signout", authenticated, AuthController.signOut);
 
 router.post("/password-reset/request", AuthController.requestPasswordReset);
 router.get("/password-reset/confirm", AuthController.confirmPasswordReset);
+router.get('/google', AuthController.googleAuth);
+router.get('/google/callback', AuthController.googleAuthCallback);
 
 export default router;

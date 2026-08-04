@@ -1,6 +1,5 @@
 import Auth from "#models/auth.model.js";
 import UserModel from "#models/user.model.js";
-import VendorModel from "#models/vendor.model.js";
 import { loginSchema, registerSchema } from "#schemas/auth.schema.js";
 import ERROR_CODES from "#utils/error.codes.js";
 import { buildRedisKey, normalizePhone, passwordHash, ROLES, validatePassword, verifyPassword } from "#utils/helpers.js";
@@ -9,6 +8,7 @@ import { respondWithError, respondWithSuccess } from "#utils/response.js";
 import redisClient from "#config/redis.js";
 import { decrypt } from "#utils/encryption.js";
 import pool from "#services/pg_pool.js";
+import passport from '#config/passport.js';
 
 export const userSignup = async (req, res) => {
     try {
@@ -88,7 +88,7 @@ export const verifyEmail = async (req, res) => {
         return respondWithSuccess(res, 200, 'Email verified successfully');
     } catch (error) {
         console.error('Error verifying email:', error);
-        return respondWithError(res, 500,'Internal server error', ERROR_CODES.INTERNAL_SERVER_ERROR);
+        return respondWithError(res, 500, 'Internal server error', ERROR_CODES.INTERNAL_SERVER_ERROR);
     }
 };
 
@@ -114,7 +114,7 @@ export const resendVerification = async (req, res) => {
 
     } catch (err) {
         console.error('Error resending verification link:', err);
-        return respondWithError(res, 500,'Internal server error', ERROR_CODES.INTERNAL_SERVER_ERROR);
+        return respondWithError(res, 500, 'Internal server error', ERROR_CODES.INTERNAL_SERVER_ERROR);
     }
 };
 
@@ -158,6 +158,42 @@ export const userSignin = async (req, res) => {
     } catch (error) {
         console.error(error);
         return respondWithError(res, 500, 'Internal server error', ERROR_CODES.INTERNAL_SERVER_ERROR);
+    }
+};
+
+export const googleAuth = (req, res, next) => {
+    try {
+        passport.authenticate("google", {
+            scope: ["profile", "email"]
+        })
+            (req, res, next);
+    } catch (error) {
+        console.error("Error initiating Google authentication:", error);
+        return respondWithError(res, 500, "Internal Server Error", ERROR_CODES.INTERNAL_SERVER_ERROR);
+    }
+};
+
+export const googleAuthCallback = (req, res, next) => {
+    try {
+        passport.authenticate("google", { session: true }, async (err, user, info) => {
+            if (err) {
+                console.error("Google authentication error:", err);
+                return respondWithError(res, 500, "Internal Server Error during Google authentication", ERROR_CODES.INTERNAL_SERVER_ERROR);
+            }
+
+            if (!user) {
+                return respondWithError(res, 401, "Google authentication failed", ERROR_CODES.GOOGLE_AUTHENTICATION_FAILED);
+            }
+
+            await new Promise((resolve, reject) => {
+                req.session.regenerate((err) => (err ? reject(err) : resolve()));
+            });
+
+        }
+        )(req, res, next);
+    } catch (error) {
+        console.error("Error handling Google authentication callback:", error);
+        return respondWithError(res, 500, "Internal Server Error", ERROR_CODES.INTERNAL_SERVER_ERROR);
     }
 };
 
