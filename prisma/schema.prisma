@@ -19,13 +19,13 @@ model users {
     email                     String      @unique
     password                  String
     role                      String
-    googleId                  String?     @unique
+    google_id                 String?     @unique
     status                    String      @default("active")
-    email_verified            Boolean   @default(false)
+    email_verified            Boolean     @default(false)
     email_verification_token  String?
     email_verified_at         DateTime?
     created_at                DateTime    @default(now())
-    updated_at                DateTime?    @updatedAt
+    updated_at                DateTime?   @updatedAt
 }
 
 model users_info {
