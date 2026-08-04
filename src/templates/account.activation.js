@@ -32,7 +32,7 @@ export const emailVerification = (user, verificationLink) => {
                 </a>
 
                 <p style="text-align: center; font-size: 13px; color: #888;">
-                This link expires in <strong>5 minutes</strong>. Do not share it with anyone.
+                This link expires in <strong>10 minutes</strong>. Do not share it with anyone.
                 </p>
 
                 <p style="text-align: center; font-size: 13px; color: #999; margin-top: 20px;">

@@ -24,12 +24,12 @@ export const sendEmailVerificationLink = async (user, verificationLink) => {
     }
 };
 
-export const sendPasswordResetLink = async (user, resetLink, vendor) => {
+export const sendPasswordResetLink = async (user, resetLink) => {
     let mailOptions = {
         from: process.env.EMAIL_USER,
         to: user.email,
         subject: 'Password Reset',
-        html: resetPassword(user, resetLink, vendor)
+        html: resetPassword(user, resetLink)
     };
 
     try {

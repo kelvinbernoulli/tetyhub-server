@@ -61,10 +61,8 @@ export const verifyEmail = async (req, res) => {
         const { token, userId, email, vendorId } = req.query;
 
         const decryptedToken = decrypt(token);
-        const decryptedUserId = decrypt(userId);
-        const decryptedVendorId = vendorId ? decrypt(vendorId) : null;
 
-        const redisKey = buildRedisKey(email, 'email_verification', decryptedVendorId, decryptedUserId);
+        const redisKey = buildRedisKey(email, 'email_verification');
 
         const stored = await redisClient.get(redisKey);
 
@@ -81,8 +79,8 @@ export const verifyEmail = async (req, res) => {
             SET email_verified = true,
                 email_verified_at = NOW(),
                 status = 'active'
-            WHERE id = $1`,
-            [decryptedUserId]
+            WHERE email = $1`,
+            [email]
         );
 
         await redisClient.del(redisKey);
@@ -101,6 +99,10 @@ export const resendVerification = async (req, res) => {
         const user = await UserModel.getUserByEmail(email);
         if (!user) {
             return respondWithError(res, 404, 'User not found', ERROR_CODES.RESOURCE_NOT_FOUND);
+        }
+
+        if (user.email_verified) {
+            return respondWithError(res, 400, 'Email already verified', ERROR_CODES.EMAIL_ALREADY_VERIFIED);
         }
 
         const resend = await Auth.activateAccount(user.email);
@@ -178,12 +180,12 @@ export const requestPasswordReset = async (req, res) => {
     try {
         const { email } = req.body;
 
-        user = await UserModel.getUserByEmail(email);
+        const user = await UserModel.getUserByEmail(email);
         if (!user) {
             return respondWithError(res, 404, 'User not found', ERROR_CODES.RESOURCE_NOT_FOUND);
         }
 
-        const send = await Auth.forgotPassword(user?.id, vendor_id);
+        const send = await Auth.forgotPassword(email);
         if (!send.success) {
             return respondWithError(res, 400, 'Failed to send password reset email', ERROR_CODES.EMAIL_SEND_FAILED);
         }
@@ -231,8 +233,8 @@ export const confirmPasswordReset = async (req, res) => {
             `UPDATE users
             SET password = $1,
                 status = 'active'
-            WHERE id = $2`,
-            [hashpassword, decryptedUserId]
+            WHERE email = $2`,
+            [hashpassword, email]
         );
 
         await redisClient.del(redisKey);

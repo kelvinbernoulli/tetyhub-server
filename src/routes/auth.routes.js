@@ -10,7 +10,7 @@ router.post("/signin", AuthController.userSignin);
 router.post("/refresh-session", authenticated, AuthController.refreshSession);
 router.get("/sessions", authenticated, AuthController.getAllSessions);
 router.post("/sessions/revoke/:sessionId", authenticated, AuthController.revokeSession);
-router.post("/logout", authenticated, AuthController.signOut);
+router.post("/signout", authenticated, AuthController.signOut);
 
 router.post("/password-reset/request", AuthController.requestPasswordReset);
 router.get("/password-reset/confirm", AuthController.confirmPasswordReset);
