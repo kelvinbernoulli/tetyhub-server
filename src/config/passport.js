@@ -1,10 +1,10 @@
 import passport from "passport";
 import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import crypto from "crypto";
-import { config } from "dotenv";
 import User from "#models/user.model.js";
 import { passwordHash } from "#utils/helpers.js";
 import Query from "#models/query.model.js";
+import { config } from "dotenv";
 config();
 
 passport.use(
