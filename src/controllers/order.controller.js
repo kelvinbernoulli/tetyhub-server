@@ -13,12 +13,12 @@ export const placeOrder = async (req, res) => {
             return respondWithError(res, 401, 'Unauthorized', ERROR_CODES.UNAUTHORIZED);
         }
 
-        const { error } = orderSchema.validate(body);
+        const { error, value } = orderSchema.validate(body, { abortEarly: false, stripUnknown: true });
         if (error) {
             return respondWithError(res, 400, error.details[0].message, ERROR_CODES.VALIDATION_ERROR);
         }
 
-        const result = await Order.placeOrder(user.id, user.vendor_id, body);
+        const result = await Order.placeOrder(user.id, value);
         if (result?.error) {
             return respondWithError(res, result.code, result.error, ERROR_CODES.VALIDATION_ERROR);
         }

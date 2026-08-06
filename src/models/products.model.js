@@ -284,7 +284,7 @@ export class Product {
         }
     }
 
-    static async update(productId, vendorId, data) {
+    static async update(productId, userId, data) {
         const client = await pool.connect();
 
         // Files uploaded during this request
@@ -336,14 +336,13 @@ export class Product {
 
             const { rows: existingRows } = await client.query(
                 `
-            SELECT *
-            FROM products
-            WHERE id = $1
-            AND vendor_id = $2
-            AND deleted_at IS NULL
-            LIMIT 1
-            `,
-                [productId, vendorId]
+                SELECT *
+                FROM products
+                WHERE id = $1
+                AND user_id = $2
+                LIMIT 1
+                `,
+                [productId, userId]
             );
 
             if (!existingRows.length) {
@@ -400,12 +399,9 @@ export class Product {
             if (thumbnail !== undefined) {
                 // Upload new thumbnail
                 if (thumbnail) {
-                    const filename = `products/thumbnails/${vendorId}-${crypto.randomUUID()}`;
+                    const filename = `products/thumbnails/${userId}-${crypto.randomUUID()}`;
 
-                    const upload = await S3upload(
-                        thumbnail,
-                        filename
-                    );
+                    const upload = await S3upload(thumbnail, filename);
 
                     if (upload.error) {
                         throw new Error(upload.message);
@@ -566,8 +562,7 @@ export class Product {
             UPDATE products
             SET ${fields.join(", ")}
             WHERE id = $${index++}
-            AND vendor_id = $${index++}
-            AND deleted_at IS NULL
+            AND user_id = $${index++}
             RETURNING *
         `;
 
@@ -617,10 +612,7 @@ export class Product {
 
                         const filename = `products/images/${productId}-${crypto.randomUUID()}`;
 
-                        const upload = await S3upload(
-                            images[i],
-                            filename
-                        );
+                        const upload = await S3upload(images[i], filename);
 
                         if (upload.error) {
                             throw new Error(upload.message);
@@ -632,7 +624,7 @@ export class Product {
                             `
                         INSERT INTO product_images (
                             product_id,
-                            vendor_id,
+                            user_id,
                             url,
                             position,
                             is_primary
@@ -641,7 +633,7 @@ export class Product {
                         `,
                             [
                                 productId,
-                                vendorId,
+                                userId,
                                 upload.url,
                                 i,
                                 i === 0
@@ -822,7 +814,7 @@ export class Product {
                                 `
                             INSERT INTO product_variants (
                                 product_id,
-                                vendor_id,
+                                user_id,
                                 sku,
                                 barcode,
                                 price,
@@ -917,7 +909,7 @@ export class Product {
 
             return await Product.findByKey(
                 [{ key: 'id', value: updatedProduct.id }],
-                vendorId
+                userId
             );
 
         } catch (error) {
@@ -948,7 +940,7 @@ export class Product {
         }
     }
 
-    static async findAllByVendor(vendorId, filters = {}) {
+    static async findAllByVendor(userId, filters = {}) {
         const client = await pool.connect();
 
         try {
@@ -1003,11 +995,10 @@ export class Product {
             */
 
             const conditions = [
-                `p.vendor_id = $1`,
-                `p.deleted_at IS NULL`
+                `p.user_id = $1`
             ];
 
-            const values = [vendorId];
+            const values = [userId];
 
             let index = 2;
 
@@ -1104,7 +1095,7 @@ export class Product {
             const query = `
             SELECT
                 p.id,
-                p.vendor_id,
+                p.user_id,
                 p.category_id,
                 p.subcategory_id,
                 p.name,
@@ -1207,7 +1198,7 @@ export class Product {
         }
     }
 
-    static async search(vendorId, filters = {}) {
+    static async search(userId, filters = {}) {
         try {
             const {
                 q, category_id, brand,
@@ -1219,8 +1210,8 @@ export class Product {
             } = filters;
 
             let paramIndex = 1;
-            const whereClauses = [`p.vendor_id = $${paramIndex++}`, `p.deleted_at IS NULL`];
-            const values = [vendorId];
+            const whereClauses = [`p.user_id = $${paramIndex++}`];
+            const values = [userI];
 
             // Full text search
             if (q) {
@@ -1364,7 +1355,7 @@ export class Product {
         }
     }
 
-    static async getFilters(vendorId) {
+    static async getFilters(userId) {
         try {
             const { rows } = await pool.query(
                 `SELECT
@@ -1391,7 +1382,7 @@ export class Product {
                 WHERE p.vendor_id = $1
                 AND p.status = 'active'
                 AND p.deleted_at IS NULL`,
-                [vendorId]
+                [userId]
             );
 
             return rows[0];
@@ -1401,7 +1392,7 @@ export class Product {
         }
     }
 
-    static async getRelatedProducts(productId, vendorId, limit = 8) {
+    static async getRelatedProducts(productId, limit = 5) {
         try {
             // Get current product's category and tags
             const { rows: productRows } = await pool.query(
@@ -1435,7 +1426,7 @@ export class Product {
                     CASE WHEN p.category_id = $3 THEN 0 ELSE 1 END,
                     p.created_at DESC
                 LIMIT $5`,
-                [vendorId, productId, category_id, tags ?? [], limit]
+                [productId, category_id, tags ?? [], limit]
             );
 
             return rows;
@@ -1445,7 +1436,7 @@ export class Product {
         }
     }
 
-    static async getFeaturedProducts(vendorId, limit = 10) {
+    static async getFeaturedProducts(limit = 10) {
         try {
             const { rows } = await pool.query(
                 `SELECT
@@ -1468,7 +1459,7 @@ export class Product {
                 GROUP BY p.id
                 ORDER BY p.created_at DESC
                 LIMIT $2`,
-                [vendorId, limit]
+                [limit]
             );
 
             return rows;

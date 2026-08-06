@@ -37,55 +37,56 @@ const invalidateProductCache = async (vendorId, productId = null) => {
 
 export const createProduct = async (req, res) => {
     try {
-        const { error, value } = createProductSchema.validate(req.body);
+        const { session, body } = req;
+        const { error, value } = createProductSchema.validate(body, { abortEarly: false, stripUnknown: true });
         if (error) {
-            return respondWithError(res, 400, error.details[0].message, ERROR_CODES.VALIDATION_ERROR);
+            return respondWithError(res, 400, error.details.map(err => err.message).join(', '), ERROR_CODES.VALIDATION_ERROR);
         }
 
-        const user = req.session?.user;
+        const user = session?.user;
         if (!user) {
             return respondWithError(res, 401, 'Unauthorized', ERROR_CODES.UNAUTHORIZED);
         }
-        const vendorId = user.role === ROLES.VENDOR ? user.id : user.vendor_id;
-        if (!vendorId) {
+
+        const isVendor = user.role === 'vendor';
+        if (!isVendor) {
             return respondWithError(res, 403, 'Forbidden', ERROR_CODES.FORBIDDEN);
         }
 
-        const duplicate = await Product.findByKey([{ key: 'name', value: value.name }], vendorId);
+        const duplicate = await Product.findByKey([{ key: 'name', value: value.name }], user.id);
         if (duplicate) {
             return respondWithError(res, 409, 'A product with this name already exists', ERROR_CODES.CONFLICT);
         }
 
-        const category = await Category.fetchById(value.category_id, vendorId);
+        const category = await Category.fetchById(value.category_id);
         if (!category) {
             return respondWithError(res, 422, 'Invalid category ID', ERROR_CODES.VALIDATION_ERROR);
         }
 
         if (value.subcategory_id) {
-            const subcategory = await Subcategory.fetchById(value.subcategory_id, vendorId);
+            const subcategory = await Subcategory.fetchById(value.subcategory_id);
             if (!subcategory) {
                 return respondWithError(res, 422, 'Invalid subcategory ID', ERROR_CODES.VALIDATION_ERROR);
             }
         }
 
-        const countryData = await fetch_one_by_key('countries', 'id', user.country_id);
-        const currencyData = await fetch_one_by_key('currencies', 'id', countryData.rows[0].currency_id);
+        const currencyData = await fetch_one_by_key('currencies', 'id', value.currency_id);
+        if (!currencyData) {
+            return respondWithError(res, 422, 'Invalid currency ID', ERROR_CODES.VALIDATION_ERROR);
+        }
 
-
-        value.currency = currencyData.rows[0].currency_code;
-
-        const result = await Product.create(vendorId, value);
+        const result = await Product.create(user.id, value);
         if (!result) {
             return respondWithError(res, 400, 'Failed to create product', ERROR_CODES.RESOURCE_CREATION_FAILED);
         }
 
-        await invalidateProductCache(vendorId, result.id);
+        await invalidateProductCache(user.id, result.id);
 
         return respondWithSuccess(res, 201, 'Product created successfully', result);
 
     } catch (err) {
         console.error("Error creating product:", err);
-        return respondWithError(res, 500, err.message || 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);
+        return respondWithError(res, 500, 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);
     }
 };
 
@@ -99,60 +100,50 @@ export const updateProduct = async (req, res) => {
             return respondWithError(res, 401, 'Unauthorized', ERROR_CODES.UNAUTHORIZED);
         }
 
-        const { error, value } = updateProductSchema.validate(body);
+        const { error, value } = updateProductSchema.validate(body, { abortEarly: false, stripUnknown: true });
         if (error) {
             return respondWithError(res, 400, error.details.map(err => err.message).join(', '), ERROR_CODES.VALIDATION_ERROR);
         }
 
-        let vendorId;
-        if (user.role === ROLES.VENDOR) {
-            vendorId = user.id;
-        } else if (user.role === ROLES.VENDOR_ADMIN) {
-            vendorId = user.vendor_id;
-        }
-
-        if (!vendorId) {
-            return respondWithError(res, 403, 'Forbidden: Vendor information not found', ERROR_CODES.FORBIDDEN);
-        }
-
         // Check product exists and belongs to vendor
-        const productData = await Product.findByKey([{ key: 'id', value: id }], vendorId);
+        const productData = await Product.findByKey([{ key: 'id', value: id }]);
         if (!productData) {
             return respondWithError(res, 404, "Product not found", ERROR_CODES.RESOURCE_NOT_FOUND);
         }
 
-        // Check duplicate name if name is being updated
-        if (value.name && value.name !== productData.name) {
-            const duplicateProduct = await Product.findByKey([{ key: 'name', value: value.name }], vendorId);
-            if (duplicateProduct) {
-                return respondWithError(res, 409, 'A product with this name already exists', ERROR_CODES.CONFLICT);
-            }
-        }
-
         // Check category exists if being updated
         if (value.category_id) {
-            const category = await Category.fetchById(value.category_id, vendorId);
+            const category = await Category.fetchById(value.category_id);
             if (!category) {
                 return respondWithError(res, 422, 'Invalid category ID', ERROR_CODES.VALIDATION_ERROR);
             }
         }
 
-        const updatedProduct = await Product.update(id, vendorId, value);
-        if (!updatedProduct) {
-            return respondWithError(res, 400, "Failed to update product", ERROR_CODES.RESOURCE_UPDATE_FAILED);
+        // Check subcategory exists if being updated
+        if (value.subcategory_id) {
+            const subcategory = await Subcategory.fetchById(value.subcategory_id);
+            if (!subcategory) {
+                return respondWithError(res, 422, 'Invalid subcategory ID', ERROR_CODES.VALIDATION_ERROR);
+            }
         }
 
-        await invalidateProductCache(vendorId, id);
-        return respondWithSuccess(res, 200, "Product updated successfully", updatedProduct);
-    } catch (error) {
-        console.error("Error updating product:", error);
-        return respondWithError(res, 500, error.message || 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);
+        const updatedProduct = await Product.update(id, user.id, value);
+    if (!updatedProduct) {
+        return respondWithError(res, 400, "Failed to update product", ERROR_CODES.RESOURCE_UPDATE_FAILED);
     }
+
+    await invalidateProductCache(user.id, id);
+    
+    return respondWithSuccess(res, 200, "Product updated successfully", updatedProduct);
+} catch (error) {
+    console.error("Error updating product:", error);
+    return respondWithError(res, 500, error.message || 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);
+}
 }
 
 export const fetchProducts = async (req, res) => {
     try {
-        const user     = req.session?.user;
+        const user = req.session?.user;
         const vendorId = user?.role === ROLES.VENDOR ? user.id : user?.vendor_id;
 
         if (!vendorId) {
@@ -211,7 +202,7 @@ export const fetchProductById = async (req, res) => {
         } else if (user.role === ROLES.CUSTOMER) {
             vendorId = user.vendor_id;
         }
-        
+
         if (!vendorId) {
             return respondWithError(res, 403, 'Forbidden', ERROR_CODES.FORBIDDEN);
         }

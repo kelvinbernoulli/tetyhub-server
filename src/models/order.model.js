@@ -2,7 +2,7 @@ import pool from "#services/pg_pool.js";
 import Notification from "#models/notification.model.js";
 
 class Order {
-    static async placeOrder(userId, vendorId, { note, shipping_address }) {
+    static async placeOrder(userId, { note, shipping_address }) {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
@@ -19,9 +19,9 @@ class Order {
                 )) AS items
                 FROM carts c
                 JOIN cart_items ci ON ci.cart_id = c.id
-                WHERE c.user_id = $1 AND c.vendor_id = $2
+                WHERE c.user_id = $1
                 GROUP BY c.id`,
-                [userId, vendorId]
+                [userId]
             );
 
             if (cartRows.length === 0) {
@@ -49,7 +49,7 @@ class Order {
                 } else {
                     const { rows: productRows } = await client.query(
                         `SELECT name, stock FROM products 
-                        WHERE id = $1 AND status = 'active' AND deleted_at IS NULL`,
+                        WHERE id = $1 AND status = 'active'`,
                         [item.product_id]
                     );
 
@@ -69,10 +69,10 @@ class Order {
 
             // 4. Create order
             const { rows: orderRows } = await client.query(
-                `INSERT INTO orders (user_id, vendor_id, subtotal, shipping_fee, total, note)
-                VALUES ($1, $2, $3, $4, $5, $6)
+                `INSERT INTO orders (user_id, subtotal, shipping_fee, total, note)
+                VALUES ($1, $2, $3, $4, $5)
                 RETURNING *`,
-                [userId, vendorId, subtotal, shipping_fee, total, note ?? null]
+                [userId, subtotal, shipping_fee, total, note ?? null]
             );
 
             const order = orderRows[0];
@@ -141,7 +141,7 @@ class Order {
         }
     }
 
-    static async getOrderById(orderId, userId = null, vendorId = null) {
+    static async getOrderById(orderId, userId = null) {
         try {
             let paramIndex = 2;
             const whereClauses = [`o.id = $1`];
@@ -150,11 +150,6 @@ class Order {
             if (userId) {
                 whereClauses.push(`o.user_id = $${paramIndex++}`);
                 values.push(userId);
-            }
-
-            if (vendorId) {
-                whereClauses.push(`o.vendor_id = $${paramIndex++}`);
-                values.push(vendorId);
             }
 
             const { rows } = await pool.query(

@@ -21,75 +21,36 @@ export const createAdmin = async (req, res) => {
 
         const { error, value } = createAdminSchema.validate(body, { abortEarly: false, stripUnknown: true });
         if (error) {
-            return respondWithError(res, 400, error.details[0].message, ERROR_CODES.VALIDATION_ERROR);
+            return respondWithError(res, 400, error.details.map((d) => d.message).join(", "), ERROR_CODES.VALIDATION_ERROR);
         }
 
-        const { email, phone, country_id } = value;
+        const { email, phone } = value;
 
         const validEmail = isValidEmail(email);
         if (!validEmail) {
             return respondWithError(res, 400, "Invalid email format", ERROR_CODES.INVALID_FORMAT);
         }
 
-        const countryData = await UserModel.getCountryById(country_id);
-        if (!countryData) {
-            return respondWithError(res, 422, "Invalid country ID!", ERROR_CODES.VALIDATION_ERROR);
+        duplicateUser = await UserModel.getUserByEmail(email);
+        if (duplicateUser) {
+            return respondWithError(res, 409, "Email already exists", ERROR_CODES.DUPLICATE_RESOURCE);
         }
 
-        const normalizedPhone = normalizePhone(phone, countryData.country_code);
-        if (!normalizedPhone) {
-            return respondWithError(res, 400, "Invalid phone number format", ERROR_CODES.INVALID_FORMAT);
-        }
-
-        let vendorId = null;
-        if (user.role === ROLES.VENDOR) {
-            vendorId = user.id;
-        } else if (user.role === ROLES.VENDOR_ADMIN) {
-            vendorId = user.vendor_id;
-        }
-
-        let duplicateUser;
-        let duplicatePhone;
-
-        if (vendorId) {
-            duplicateUser = await VendorModel.getVendorAdminByEmail(email, vendorId)
-                ?? await CustomerModel.getCustomerByEmail(email, vendorId);
-            if (duplicateUser) {
-                return respondWithError(res, 409, "Email already exists", ERROR_CODES.CONFLICT_ERROR);
-            }
-
-            duplicatePhone = await VendorModel.getVendorAdminByPhone(normalizedPhone, vendorId)
-                ?? await CustomerModel.getCustomerByPhone(normalizedPhone, vendorId);
-            if (duplicatePhone) {
-                return respondWithError(res, 409, "Phone number already exists", ERROR_CODES.CONFLICT_ERROR);
-            }
-        } else {
-            duplicateUser = await UserModel.getUserByEmail(email);
-            if (duplicateUser) {
-                return respondWithError(res, 409, "Email already exists", ERROR_CODES.CONFLICT_ERROR);
-            }
-
-            duplicatePhone = await UserModel.getUserByPhone(normalizedPhone);
-            if (duplicatePhone) {
-                return respondWithError(res, 409, "Phone number already exists", ERROR_CODES.CONFLICT_ERROR);
-            }
+        duplicatePhone = await UserModel.getUserByPhone(phone);
+        if (duplicatePhone) {
+            return respondWithError(res, 409, "Phone number already exists", ERROR_CODES.DUPLICATE_RESOURCE);
         }
 
         const password = adminDefaultPassword();
         value.password = await passwordHash(password);
-        value.role = vendorId ? ROLES.VENDOR_ADMIN : ROLES.ADMIN;
-        value.vendor_id = vendorId ? vendorId : null;
-        value.phone = normalizedPhone;
+        value.role = "admin";
 
-        const newAdmin = await UserModel.createUser(value, vendorId);
+        const newAdmin = await UserModel.createUser(value);
         if (!newAdmin) {
             return respondWithError(res, 400, "Failed to create admin", ERROR_CODES.RESOURCE_CREATE_FAILED);
         }
 
-        if (value.role === ROLES.ADMIN || value.role === ROLES.VENDOR_ADMIN) {
-            const vendor = vendorId ? await VendorModel.getVendorById(vendorId) : null;
-            await sendAdminRegistrationEmail(newAdmin, password, vendor);
-        }
+        await sendAdminRegistrationEmail(newAdmin, password)
 
         await Auth.activateAccount(newAdmin.id);
 

@@ -16,7 +16,6 @@ export class Cart {
                         SELECT * FROM products
                         WHERE id = $1
                         AND status = 'active'
-                        AND deleted_at IS NULL
                         LIMIT 1
                         FOR UPDATE
                     `,
@@ -74,14 +73,13 @@ export class Cart {
                     FROM cart_items ci
                     INNER JOIN carts c ON c.id = ci.cart_id
                     WHERE c.user_id = $1
-                    AND c.vendor_id = $2
                     AND ci.product_id = $3
                     AND (
                         ($4::INT IS NULL AND ci.variant_id IS NULL)
                         OR ci.variant_id = $4
                     )
                 `,
-                [userId, vendorId, product_id, variant_id]
+                [userId, product_id, variant_id]
             );
 
             const existingItem =
@@ -104,16 +102,15 @@ export class Cart {
                 await client.query(
                     `
                         INSERT INTO carts (
-                            user_id,
-                            vendor_id
+                            user_id
                         )
-                        VALUES ($1, $2)
-                        ON CONFLICT (user_id, vendor_id)
+                        VALUES ($1)
+                        ON CONFLICT (user_id)
                         DO UPDATE SET
                             updated_at = NOW()
                         RETURNING *
                     `,
-                    [userId, vendorId]
+                    [userId]
                 );
 
             const cart = cartRows[0];
@@ -144,12 +141,12 @@ export class Cart {
                     await client.query(
                         `
                             INSERT INTO cart_items (
-                                cart_id, vendor_id, product_id, variant_id, quantity, price
+                                cart_id, product_id, variant_id, quantity, price
                             )
-                            VALUES ($1, $2, $3, $4, $5, $6)
+                            VALUES ($1, $2, $3, $4, $5)
                             RETURNING *
                         `,
-                        [cart.id, vendorId, product_id, variant_id, quantity, price]
+                        [cart.id, product_id, variant_id, quantity, price]
                     );
 
                 cartItem = rows[0];
@@ -157,7 +154,7 @@ export class Cart {
 
             await client.query('COMMIT');
 
-            return await Cart.getCart(userId, vendorId);
+            return await Cart.getCart(userId);
 
         } catch (error) {
             await client.query('ROLLBACK');
@@ -168,15 +165,7 @@ export class Cart {
         }
     }
 
-    static async updateCart(
-        userId,
-        vendorId,
-        {
-            product_id,
-            variant_id = null,
-            quantity
-        } = {}
-    ) {
+    static async updateCart(userId, { product_id, variant_id = null, quantity } = {}) {
 
         const client = await pool.connect();
 
@@ -186,14 +175,13 @@ export class Cart {
 
             const { rows: productRows } = await client.query(
                 `
-            SELECT *
-            FROM products
-            WHERE id = $1
-            AND vendor_id = $2
-            AND status = 'active'
-            AND deleted_at IS NULL
-            `,
-                [product_id, vendorId]
+                SELECT *
+                FROM products
+                WHERE id = $1
+                AND status = 'active'
+                AND deleted_at IS NULL
+                `,
+                [product_id]
             );
 
             if (!productRows.length) {
@@ -262,13 +250,12 @@ export class Cart {
 
             const { rows: cartRows } = await client.query(
                 `
-            SELECT *
-            FROM carts
-            WHERE user_id = $1
-            AND vendor_id = $2
-            LIMIT 1
-            `,
-                [userId, vendorId]
+                SELECT *
+                FROM carts
+                WHERE user_id = $1
+                LIMIT 1
+                `,
+                [userId]
             );
 
             if (!cartRows.length) {
@@ -285,19 +272,19 @@ export class Cart {
 
             const { rows: itemRows } = await client.query(
                 `
-            UPDATE cart_items
-            SET
-                quantity = $1,
-                price = $2,
-                updated_at = NOW()
-            WHERE cart_id = $3
-            AND product_id = $4
-            AND (
-                ($5::INT IS NULL AND variant_id IS NULL)
-                OR variant_id = $5
-            )
-            RETURNING *
-            `,
+                UPDATE cart_items
+                SET
+                    quantity = $1,
+                    price = $2,
+                    updated_at = NOW()
+                WHERE cart_id = $3
+                AND product_id = $4
+                AND (
+                    ($5::INT IS NULL AND variant_id IS NULL)
+                    OR variant_id = $5
+                )
+                RETURNING *
+                `,
                 [
                     quantity,
                     price,
@@ -319,19 +306,13 @@ export class Cart {
 
             await client.query('COMMIT');
 
-            return await Cart.getCart(
-                userId,
-                vendorId
-            );
+            return await Cart.getCart(userId);
 
         } catch (error) {
 
             await client.query('ROLLBACK');
 
-            console.error(
-                'Error updating cart item:',
-                error
-            );
+            console.error('Error updating cart item:', error);
 
             throw error;
 
@@ -347,7 +328,6 @@ export class Cart {
                 `SELECT
                     c.id AS cart_id,
                     c.user_id,
-                    c.vendor_id,
                     json_agg(jsonb_build_object(
                         'id', ci.id,
                         'product_id', ci.product_id,
@@ -365,7 +345,7 @@ export class Cart {
                 LEFT JOIN products p ON p.id = ci.product_id
                 WHERE c.user_id = $1 AND c.vendor_id = $2
                 GROUP BY c.id`,
-                [userId, vendorId]
+                [userId]
             );
 
             return rows[0] ?? null;
@@ -375,14 +355,13 @@ export class Cart {
         }
     }
 
-    static async getCartItems(userId, vendorId, pagination) {
+    static async getCartItems(userId, pagination) {
         try {
             const { offset = 0, limit = 20 } = pagination;
             const { rows } = await pool.query(
                 `SELECT
                     c.id AS cart_id,
                     c.user_id,
-                    c.vendor_id,
                     json_agg(jsonb_build_object(
                         'id', ci.id,
                         'product_id', ci.product_id,
@@ -398,10 +377,10 @@ export class Cart {
                 FROM carts c
                 LEFT JOIN cart_items ci ON ci.cart_id = c.id
                 LEFT JOIN products p ON p.id = ci.product_id
-                WHERE c.user_id = $1 AND c.vendor_id = $2
-                OFFSET = $3 AND LIMIT = $4
+                WHERE c.user_id = $1
+                OFFSET $2 AND LIMIT $3
                 GROUP BY c.id`,
-                [userId, vendorId, offset, limit]
+                [userId, offset, limit]
             );
 
             return rows[0] ?? null;
@@ -411,7 +390,7 @@ export class Cart {
         }
     }
 
-    static async removeFromCart(userId, vendorId, cartItemId) {
+    static async removeFromCart(userId, cartItemId) {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
@@ -423,10 +402,9 @@ export class Cart {
                     INNER JOIN carts c ON c.id = ci.cart_id
                     WHERE ci.id = $1
                     AND c.user_id = $2
-                    AND c.vendor_id = $3
                     FOR UPDATE
                 `,
-                [cartItemId, userId, vendorId]
+                [cartItemId, userId]
             );
             console.log('item', itemRows)
             if (!itemRows.length) {
@@ -472,7 +450,7 @@ export class Cart {
             await client.query('COMMIT');
 
             return remainingItems.length > 0
-                ? await CartModel.getCart(userId, vendorId)
+                ? await CartModel.getCart(userId)
                 : {
                     cart_id: null,
                     items: [],
@@ -489,7 +467,7 @@ export class Cart {
         }
     }
 
-    static async previewCheckout(userId, vendorId, couponCode = null) {
+    static async previewCheckout(userId, couponCode = null) {
         try {
             const { rows } = await pool.query(
                 `
@@ -535,12 +513,11 @@ export class Cart {
                         )
 
                     WHERE c.user_id = $1
-                    AND c.vendor_id = $2
 
                     GROUP BY c.id
                     LIMIT 1
                 `,
-                [userId, vendorId]
+                [userId]
             );
 
             if (!rows.length || !rows[0].items || rows[0].items.length === 0) {
@@ -576,7 +553,7 @@ export class Cart {
             let couponData = null;
 
             if (couponCode) {
-                const couponResult = await Cart.validateCoupon(couponCode, vendorId, userId, subtotal);
+                const couponResult = await Cart.validateCoupon(couponCode, userId, subtotal);
 
                 if (couponResult?.error) {
                     return couponResult;
@@ -616,7 +593,7 @@ export class Cart {
     }
 
     // ─── CALCULATE SHIPPING ────────────────────────────
-    static async calculateShipping(vendorId, subtotal) {
+    static async calculateShipping(userId, subtotal) {
         // You can make this dynamic based on vendor shipping settings
         // For now using simple flat rate logic
         if (subtotal >= 100) return 0;  // free shipping over $100
@@ -624,15 +601,15 @@ export class Cart {
     }
 
     // ─── VALIDATE COUPON ───────────────────────────────
-    static async validateCoupon(code, vendorId, userId, subtotal) {
+    static async validateCoupon(code, userId, subtotal) {
         try {
             // 1. Find coupon
             const { rows: couponRows } = await pool.query(
                 `SELECT * FROM coupons
-                WHERE code = $1 AND vendor_id = $2
+                WHERE code = $1
                 AND status = 'active'
                 AND (expires_at IS NULL OR expires_at > NOW())`,
-                [code, vendorId]
+                [code]
             );
 
             if (couponRows.length === 0) {
@@ -682,7 +659,7 @@ export class Cart {
         }
     }
 
-    static async processCheckout(user, vendor, data) {
+    static async processCheckout(user, data) {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
@@ -691,7 +668,7 @@ export class Cart {
 
 
             // 1. Preview checkout to get totals
-            const preview = await Cart.previewCheckout(user.id, user.vendor_id, coupon_code);
+            const preview = await Cart.previewCheckout(user.id, coupon_code);
             if (preview?.error) {
                 return preview;
             }
@@ -714,14 +691,12 @@ export class Cart {
 
             // 3. Create order
             const { rows: orderRows } = await client.query(
-                `INSERT INTO orders (user_id, vendor_id, subtotal, shipping_fee, discount, total, payment_method, note)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                `INSERT INTO orders (user_id, subtotal, shipping_fee, discount, total, payment_method, note)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
                 RETURNING *`,
                 [
-                    user.id, user.vendor_id,
-                    preview.subtotal, preview.shipping_fee,
-                    preview.discount, preview.total,
-                    gateway, note ?? null
+                    user.id, preview.subtotal, preview.shipping_fee,
+                    preview.discount, preview.total, gateway, note ?? null
                 ]
             );
 
@@ -781,8 +756,8 @@ export class Cart {
 
             // 7. Clear cart
             await client.query(
-                `DELETE FROM carts WHERE user_id = $1 AND vendor_id = $2`,
-                [user.id, user.vendor_id]
+                `DELETE FROM carts WHERE user_id = $1`,
+                [user.id]
             );
 
             // 8. Insert order status history
@@ -804,7 +779,7 @@ export class Cart {
             console.log('order items', order.items)
 
             // 10. Send order confirmation email
-            await sendOrderConfirmationEmail(user, order, vendor);
+            await sendOrderConfirmationEmail(user, order);
 
             return {
                 order_id: order.id,

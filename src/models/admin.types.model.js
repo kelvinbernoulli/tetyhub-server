@@ -1,34 +1,12 @@
 import pool from "#services/pg_pool.js";
 
 class AdminType {
-    static async duplicateType(name, vendorId = null) {
-        const { rows } = await pool.query(
-            `SELECT * FROM admin_types WHERE admin_type = $1 AND ($2::int IS NULL OR vendor_id = $2) AND deleted_at IS NULL`,
-            [name, vendorId]
-        );
-        return rows[0] ?? null;
-    }
-
-    static async deleteType(id, vendorId = null) {
-        const { rows } = await pool.query(
-            `UPDATE admin_types SET deleted_at = NOW() WHERE id = $1 AND ($2::int IS NULL OR vendor_id = $2) AND deleted_at IS NULL RETURNING *`,
-            [id, vendorId]
-        );
-        return rows[0] ?? null;
-    }
-
-    static async fetchAdminTypes(vendorId = null, filters = {}, offset = 0, limit = 20) {
+    static async fetchAdminTypes(filters = {}, offset = 0, limit = 20) {
         try {
             const values = [];
             const whereClauses = [`deleted_at IS NULL`];
 
             let index = 1;
-
-            // Vendor filter
-            if (vendorId) {
-                whereClauses.push(`vendor_id = $${index++}`);
-                values.push(vendorId);
-            }
 
             // Search filter
             if (filters.search?.trim()) {
@@ -99,18 +77,12 @@ class AdminType {
         }
     }
 
-    static async getAdminTypesByIds(ids, vendorId = null) {
-        console.log("Fetching admin types with IDs:", ids, "for vendorId:", vendorId);
+    static async getAdminTypesByIds(ids) {
         const { rows } = await pool.query(
             `SELECT * FROM admin_types 
             WHERE id = ANY($1::integer[])
-            AND deleted_at IS NULL
-            AND (
-                $2::integer IS NULL
-                OR vendor_id = $2
-                OR vendor_id IS NULL
-            )`,
-            [ids, vendorId]
+            AND deleted_at IS NULL`,
+            [ids]
         );
         console.log("Fetched admin types:", rows);
         return rows;

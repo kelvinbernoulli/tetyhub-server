@@ -13,23 +13,10 @@ export const getVendorOrders = async (req, res) => {
             return respondWithError(res, 401, 'Unauthorized', ERROR_CODES.UNAUTHORIZED);
         }
 
-        let vendorId;
-        if (user.role === ROLES.VENDOR) {
-            vendorId = user.id;
-        } else if (user.role === ROLES.VENDOR_ADMIN) {
-            vendorId = user.vendor_id;
-        } else {
-            return respondWithError(res, 403, 'Forbidden', ERROR_CODES.FORBIDDEN);
-        }
-
-        if (!vendorId) {
-            return respondWithError(res, 403, 'Forbidden', ERROR_CODES.FORBIDDEN);
-        }
-
         const { offset, limit } = pagination;
         const { status, payment_status } = query;
         
-        const orders = await Order.fetchVendorOrders(vendorId, { status, payment_status, offset, limit });
+        const orders = await Order.fetchVendorOrders(user.id, { status, payment_status, offset, limit });
 
         if (orders.length === 0) {
             return respondWithError(res, 404, 'No orders found', ERROR_CODES.RESOURCE_NOT_FOUND);

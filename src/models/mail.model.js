@@ -1,8 +1,8 @@
 import transporter from "#services/mail_transporter.js";
 import { emailVerification } from "#templates/account.activation.js";
+import { adminRegistration } from "#templates/admin.registration.js";
+import { orderConfirmation } from "#templates/order.confirmation.js";
 import { resetPassword } from "#templates/reset.password.js";
-// import { adminRegistration } from "#templates/admin.reg.js";
-// import { orderConfirmation } from "#templates/order.comfirmation.js";
 import { config } from "dotenv";
 config();
 
@@ -42,12 +42,12 @@ export const sendPasswordResetLink = async (user, resetLink) => {
     }
 };
 
-export const sendAdminRegistrationEmail = async (user, data, vendor) => {
+export const sendAdminRegistrationEmail = async (user, data) => {
     let mailOptions = {
         from: process.env.EMAIL_USER,
         to: user.email,
         subject: 'Admin Registration',
-        html: adminRegistration(user, data, vendor)
+        html: adminRegistration(user, data)
     };
 
     try {
@@ -60,12 +60,12 @@ export const sendAdminRegistrationEmail = async (user, data, vendor) => {
     }
 };
 
-export const sendOrderConfirmationEmail = async (user, order, vendor) => {
+export const sendOrderConfirmationEmail = async (user, order) => {
     let mailOptions = {
         from: process.env.EMAIL_USER,
         to: user.email,
         subject: 'Order Confirmation',
-        html: orderConfirmation(user, order, vendor)
+        html: orderConfirmation(user, order)
     };
 
     try {
