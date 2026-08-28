@@ -4,7 +4,7 @@ config();
 
 export const transporter = nodemailer.createTransport({
     host: process.env.MAILER_HOST,
-    port: process.env.MAILER_PORT || 587,
+    port: process.env.MAILER_PORT || 2525,
     secure: process.env.MAIL_SECURE === 'true',
     auth: {
         user: process.env.MAILER_USER,
