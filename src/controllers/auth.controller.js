@@ -105,7 +105,7 @@ export const resendVerification = async (req, res) => {
             return respondWithError(res, 400, 'Email already verified', ERROR_CODES.EMAIL_ALREADY_VERIFIED);
         }
 
-        const resend = await Auth.activateAccount(user.email);
+        const resend = await Auth.activateAccount(user.id);
         if (!resend.success) {
             return respondWithError(res, 400, resend.message, resend.code);
         }
