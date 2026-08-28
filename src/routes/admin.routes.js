@@ -7,6 +7,8 @@ import * as AdminsController from "#controllers/admin.controller.js";
 import * as PermissionsController from "#controllers/permission.controller.js";
 import * as TransactionHistoryController from "#controllers/transaction.history.controller.js";
 import * as ReturnController from "#controllers/return.controller.js";
+import * as CategoriesController from '#controllers/categories.controller.js'
+import * as SubcategoriesController from '#controllers/subcategories.controller.js'
 import pagination from "#middlewares/pagination.middleware.js";
 import { Router } from "express";
 import { authenticated, canCreate, canDelete, canRead, canUpdate, isAllAdmin, isSuperAdmin } from "#middlewares/auth.middleware.js";
@@ -26,6 +28,12 @@ router.get("/countries/view/:countryId", CountriesController.fetchCountryById);
 router.patch("/countries/update/:countryId", authenticated, canUpdate('countries'), CountriesController.updateCountry);
 router.delete("/countries/delete/:countryId", authenticated, canDelete('countries'), CountriesController.deleteCountry);
 
+//categories
+router.post("/categories/create", authenticated, canCreate('category'), CategoriesController.createCountry);
+router.get("/countries", pagination, CountriesController.fetchCountries);
+router.get("/countries/view/:countryId", CountriesController.fetchCountryById);
+router.patch("/countries/update/:countryId", authenticated, canUpdate('countries'), CountriesController.updateCountry);
+router.delete("/countries/delete/:countryId", authenticated, canDelete('countries'), CountriesController.deleteCountry);
 
 //support tickets
 router.post("/support-tickets/create", authenticated, canCreate('support'), supportTicketsController.createSupportTicket);

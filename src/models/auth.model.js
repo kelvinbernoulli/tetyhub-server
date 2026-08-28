@@ -8,13 +8,13 @@ import { config } from "dotenv";
 config();
 
 export class Auth {
-    static async activateAccount(email) {
+    static async activateAccount(id) {
         const { rows } = await pool.query(
             `SELECT u.id, u.email, u.role, u.email_verified
             FROM users u
-            WHERE u.email = $1
+            WHERE u.id = $1
             LIMIT 1`,
-            [email]
+            [id]
         );
 
         const user = rows[0];
@@ -36,7 +36,7 @@ export class Auth {
         const redisKey = buildRedisKey(user.email, 'email_verification');
         await redisClient.set(redisKey, code.toString(), { EX: 600 }); // 10 minutes expiration
 
-        const link = new URL('/v1/api/auth/verify-email', process.env.DEV_URL);
+        const link = new URL('/v1/api/auth/verify-email', process.env.PROD_URL);
         link.searchParams.set('token', encryptedCode);
         link.searchParams.set('email', user.email);
         
@@ -69,7 +69,7 @@ export class Auth {
         const redisKey = buildRedisKey(user.email, 'password_reset');
         await redisClient.set(redisKey, code.toString(), { EX: 600 }); // 10 minutes expiration
 
-        const link = new URL('/v1/api/auth/password-reset/confirm', process.env.DEV_URL);
+        const link = new URL('/v1/api/auth/password-reset/confirm', process.env.PROD_URL);
         link.searchParams.set('token', encryptedCode);
         link.searchParams.set('email', user.email);
 

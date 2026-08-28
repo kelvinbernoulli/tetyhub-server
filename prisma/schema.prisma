@@ -12,26 +12,615 @@ datasource db {
     provider = "postgresql"
 }
 
+// ===============================================
+// USERS & AUTHENTICATION
+// ===============================================
+
 model users {
     id                        Int         @id @default(autoincrement())
     firstname                 String?
     lastname                  String?
     email                     String      @unique
     password                  String
-    role                      String
+    phone                     String?
+    country_id                Int?
+    role                      String      @default("customer") // customer, vendor, admin, vendor_admin
     google_id                 String?     @unique
-    status                    String      @default("active")
+    status                    String      @default("active") // active, inactive, suspended
     email_verified            Boolean     @default(false)
     email_verification_token  String?
     email_verified_at         DateTime?
+    admin_role                String[]    @default([]) // array of admin type IDs
+    vendor_id                 Int?
+    deleted_at                DateTime?
     created_at                DateTime    @default(now())
     updated_at                DateTime?   @updatedAt
+
+    // Relations
+    user_info                 users_info?
+    vendors                   vendors?
+    orders                     orders[]
+    payments                   payments[]
+    carts                      carts[]
+    wishlists                  wishlist_items[]
+    reviews                    reviews[]
+    returns                    returns[]
+    notifications              notifications[]
+    activity_logs              activity_logs[]
+    support_tickets            support_tickets[]
+    support_ticket_replies     support_ticket_replies[]
+    admin                      admins?
+    admin_permissions          admin_permissions[]
 }
 
 model users_info {
     id              Int         @id @default(autoincrement())
+    user_id         Int         @unique
     avatar          String?
     phone           String?
+    address         String?
+    city            String?
+    state           String?
+    postal_code     String?
+    country         String?
     created_at      DateTime    @default(now())
     updated_at      DateTime?   @updatedAt
+
+    // Relations
+    user            users       @relation(fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+// ===============================================
+// VENDORS & ADMIN
+// ===============================================
+
+model vendors {
+    id                  Int         @id @default(autoincrement())
+    user_id             Int         @unique
+    store_name          String
+    store_slug          String?     @unique
+    description         String?
+    logo                String?
+    banner              String?
+    phone_one           String
+    phone_two           String?
+    facebook            String?
+    twitter             String?
+    instagram           String?
+    linkedIn            String?
+    snapchat            String?
+    whatsapp            String?
+    email               String?
+    website             String?
+    address             String?
+    city                String?
+    state               String?
+    postal_code         String?
+    country_id          String?
+    verification_status String      @default("pending") // pending, verified, rejected
+    commission_rate     Float       @default(0)
+    status              String      @default("active") // active, inactive, suspended
+    created_at          DateTime    @default(now())
+    updated_at          DateTime?   @updatedAt
+
+    // Relations
+    user                users       @relation(fields: [user_id], references: [id], onDelete: Cascade)
+    products            products[]
+    orders              orders[]
+    payments            payments[]
+    coupons             coupons[]
+    support_tickets     support_tickets[]
+    vendor_settings     vendor_settings?
+}
+
+model admins {
+    id              Int         @id @default(autoincrement())
+    user_id         Int         @unique
+    role            String      @default("admin")
+    status          String      @default("active")
+    deleted_at      DateTime?
+    created_at      DateTime    @default(now())
+    updated_at      DateTime?   @updatedAt
+
+    // Relations
+    user            users       @relation(fields: [user_id], references: [id], onDelete: Cascade)
+    permissions     admin_permissions[]
+}
+
+model admin_types {
+    id              Int         @id @default(autoincrement())
+    admin_type      String      @unique
+    slug            String      @unique
+    description     String?
+    status          Boolean     @default(true)
+    deleted_at      DateTime?
+    created_at      DateTime    @default(now())
+    updated_at      DateTime?   @updatedAt
+
+    // Relations
+    permissions     admin_permissions[]
+}
+
+model admin_permissions {
+    id              Int         @id @default(autoincrement())
+    admin_id        Int
+    admin_type_id   Int
+    can_create      Boolean     @default(false)
+    can_read        Boolean     @default(true)
+    can_update      Boolean     @default(false)
+    can_delete      Boolean     @default(false)
+    status          Boolean     @default(true)
+    created_at      DateTime    @default(now())
+    updated_at      DateTime?   @updatedAt
+
+    // Relations
+    admin           admins      @relation(fields: [admin_id], references: [id], onDelete: Cascade)
+    admin_type      admin_types @relation(fields: [admin_type_id], references: [id], onDelete: Cascade)
+    user            users?      @relation(fields: [admin_id], references: [id])
+
+    @@unique([admin_id, admin_type_id])
+}
+
+// ===============================================
+// CATEGORIES & PRODUCTS
+// ===============================================
+
+model categories {
+    id              Int         @id @default(autoincrement())
+    name            String      @unique
+    slug            String      @unique
+    description     String?
+    image           String?
+    status          Boolean     @default(true)
+    created_at      DateTime    @default(now())
+    updated_at      DateTime?   @updatedAt
+
+    // Relations
+    subcategories   subcategories[]
+    products        products[]
+}
+
+model subcategories {
+    id              Int         @id @default(autoincrement())
+    category_id     Int
+    name            String
+    slug            String
+    description     String?
+    image           String?
+    status          Boolean     @default(true)
+    created_at      DateTime    @default(now())
+    updated_at      DateTime?   @updatedAt
+
+    // Relations
+    category        categories  @relation(fields: [category_id], references: [id], onDelete: Cascade)
+    products        products[]
+
+    @@unique([category_id, slug])
+}
+
+model products {
+    id                  Int         @id @default(autoincrement())
+    vendor_id           Int
+    category_id         Int
+    subcategory_id      Int?
+    name                String
+    slug                String
+    description         String?
+    short_description   String?
+    brand               String?
+    tags                String[]    @default([])
+    price               Decimal     @db.Decimal(10, 2)
+    compare_at_price    Decimal?    @db.Decimal(10, 2)
+    cost_price          Decimal?    @db.Decimal(10, 2)
+    discount            Float       @default(0)
+    stock               Int         @default(0)
+    low_stock_threshold Int         @default(10)
+    track_inventory     Boolean     @default(true)
+    has_variants        Boolean     @default(false)
+    thumbnail           String?
+    weight              Float?
+    length              Float?
+    width               Float?
+    height              Float?
+    free_shipping       Boolean     @default(false)
+    status              String      @default("draft") // draft, active, archived
+    is_featured         Boolean     @default(false)
+    is_digital          Boolean     @default(false)
+    meta_title          String?
+    meta_description    String?
+    currency_id         Int         
+    deleted_at          DateTime?
+    created_at          DateTime    @default(now())
+    updated_at          DateTime?   @updatedAt
+
+    // Relations
+    vendor              vendors     @relation(fields: [vendor_id], references: [id], onDelete: Cascade)
+    category            categories  @relation(fields: [category_id], references: [id])
+    subcategory         subcategories? @relation(fields: [subcategory_id], references: [id])
+    images              product_images[]
+    variants            product_variants[]
+    cart_items          cart_items[]
+    order_items         order_items[]
+    reviews             reviews[]
+    wishlist_items      wishlist_items[]
+    coupons             coupons[]
+}
+
+model product_images {
+    id              Int         @id @default(autoincrement())
+    product_id      Int
+    vendor_id       Int
+    url             String
+    position        Int         @default(0)
+    is_primary      Boolean     @default(false)
+    created_at      DateTime    @default(now())
+    updated_at      DateTime?   @updatedAt
+
+    // Relations
+    product         products    @relation(fields: [product_id], references: [id], onDelete: Cascade)
+    vendor          vendors     @relation(fields: [vendor_id], references: [id], onDelete: Cascade)
+}
+
+model product_variants {
+    id              Int         @id @default(autoincrement())
+    product_id      Int
+    vendor_id       Int
+    name            String?
+    sku             String?
+    price           Decimal     @db.Decimal(10, 2)
+    compare_at_price Decimal?   @db.Decimal(10, 2)
+    cost_price      Decimal?    @db.Decimal(10, 2)
+    stock           Int         @default(0)
+    weight          Float?
+    dimensions      String?
+    status          String      @default("active")
+    created_at      DateTime    @default(now())
+    updated_at      DateTime?   @updatedAt
+
+    // Relations
+    product         products    @relation(fields: [product_id], references: [id], onDelete: Cascade)
+    vendor          vendors     @relation(fields: [vendor_id], references: [id], onDelete: Cascade)
+}
+
+// ===============================================
+// SHOPPING CART & WISHLISTS
+// ===============================================
+
+model carts {
+    id              Int         @id @default(autoincrement())
+    user_id         Int         @unique
+    total_items     Int         @default(0)
+    subtotal        Decimal     @default(0) @db.Decimal(10, 2)
+    created_at      DateTime    @default(now())
+    updated_at      DateTime?   @updatedAt
+
+    // Relations
+    user            users       @relation(fields: [user_id], references: [id], onDelete: Cascade)
+    items           cart_items[]
+}
+
+model cart_items {
+    id              Int         @id @default(autoincrement())
+    cart_id         Int
+    product_id      Int
+    variant_id      Int?
+    quantity        Int
+    price           Decimal     @db.Decimal(10, 2)
+    created_at      DateTime    @default(now())
+    updated_at      DateTime?   @updatedAt
+
+    // Relations
+    cart            carts       @relation(fields: [cart_id], references: [id], onDelete: Cascade)
+    product         products    @relation(fields: [product_id], references: [id])
+}
+
+model wishlist_items {
+    id              Int         @id @default(autoincrement())
+    user_id         Int
+    product_id      Int
+    created_at      DateTime    @default(now())
+
+    // Relations
+    user            users       @relation(fields: [user_id], references: [id], onDelete: Cascade)
+    product         products    @relation(fields: [product_id], references: [id], onDelete: Cascade)
+
+    @@unique([user_id, product_id]) // Keeps entries unique per user
+    @@map("wishlist_items")
+}
+
+
+// ===============================================
+// ORDERS & PAYMENTS
+// ===============================================
+
+model orders {
+    id                  Int         @id @default(autoincrement())
+    user_id             Int
+    order_number        String      @unique // 1. Remove optionality
+    subtotal            Decimal     @db.Decimal(10, 2)
+    shipping_fee        Decimal     @default(0) @db.Decimal(10, 2)
+    tax                 Decimal     @default(0) @db.Decimal(10, 2)
+    discount            Decimal     @default(0) @db.Decimal(10, 2)
+    total               Decimal     @db.Decimal(10, 2)
+    note                String?
+    coupon_id           Int?
+    coupon_code         String?
+    status              String      @default("pending") 
+    payment_status      String      @default("unpaid") 
+    payment_method      String?
+    shipping_address    Json?       // 2. Pivot String to structured Json
+    billing_address     Json?       // 2. Pivot String to structured Json
+    deleted_at          DateTime?
+    created_at          DateTime    @default(now())
+    updated_at          DateTime?   @updatedAt
+
+    // Relations
+    user                users       @relation(fields: [user_id], references: [id])
+    items               order_items[]
+    payments            payments[]
+    shipments           shipments[]
+    returns             returns[]
+
+    @@index([user_id, status]) // 3. Build compound performance indices
+    @@index([created_at])
+}
+
+model order_items {
+    id              Int         @id @default(autoincrement())
+    order_id        Int
+    product_id      Int
+    variant_id      Int?
+    quantity        Int
+    price           Decimal     @db.Decimal(10, 2)
+    subtotal        Decimal     @db.Decimal(10, 2)
+    created_at      DateTime    @default(now())
+    updated_at      DateTime?   @updatedAt
+
+    // Relations
+    order           orders      @relation(fields: [order_id], references: [id], onDelete: Cascade)
+    product         products    @relation(fields: [product_id], references: [id])
+}
+
+model payments {
+    id              Int         @id @default(autoincrement())
+    order_id        Int?
+    user_id         Int
+    vendor_id       Int?
+    gateway         String      // paystack, stripe, etc
+    gateway_ref     String      @unique
+    amount          Decimal     @db.Decimal(10, 2)
+    currency        String      @default("NGN")
+    status          String      @default("pending") // pending, completed, failed
+    meta            String?     // JSON metadata
+    created_at      DateTime    @default(now())
+    updated_at      DateTime?   @updatedAt
+
+    // Relations
+    order           orders?     @relation(fields: [order_id], references: [id])
+    user            users       @relation(fields: [user_id], references: [id])
+    vendor          vendors?    @relation(fields: [vendor_id], references: [id])
+}
+
+model coupons {
+    id              Int         @id @default(autoincrement())
+    vendor_id       Int
+    product_id      Int?
+    code            String
+    type            String      // percentage, fixed_amount
+    value           Decimal     @db.Decimal(10, 2)
+    max_discount    Decimal?    @db.Decimal(10, 2)
+    min_order       Decimal     @default(0) @db.Decimal(10, 2)
+    usage_limit     Int?
+    usage_count     Int         @default(0)
+    status          String      @default("active")
+    expires_at      DateTime?
+    description     String?
+    deleted_at      DateTime?
+    created_at      DateTime    @default(now())
+    updated_at      DateTime?   @updatedAt
+
+    // Relations
+    vendor          vendors     @relation(fields: [vendor_id], references: [id])
+    product         products?   @relation(fields: [product_id], references: [id]) 
+
+    @@unique([vendor_id, code])
+    @@index([status, expires_at, deleted_at]) // 2. Add performance index
+}
+
+
+// ===============================================
+// SHIPMENTS & RETURNS
+// ===============================================
+
+model shipments {
+    id                      Int         @id @default(autoincrement())
+    order_id                Int         @unique
+    tracking_number         String?
+    carrier                 String?
+    shipping_method         String?
+    estimated_delivery      DateTime?
+    actual_delivery         DateTime?
+    shipping_cost           Decimal     @default(0) @db.Decimal(10, 2)
+    status                  String      @default("pending") // pending, processing, shipped, in_transit, delivered
+    notes                   String?
+    created_at              DateTime    @default(now())
+    updated_at              DateTime?   @updatedAt
+
+    // Relations
+    order                   orders      @relation(fields: [order_id], references: [id], onDelete: Cascade)
+    tracking_history        shipment_tracking_history[]
+}
+
+model shipment_tracking_history {
+    id              Int         @id @default(autoincrement())
+    shipment_id     Int
+    status          String
+    location        String?
+    description     String?
+    created_at      DateTime    @default(now())
+
+    // Relations
+    shipment        shipments   @relation(fields: [shipment_id], references: [id], onDelete: Cascade)
+}
+
+model returns {
+    id              Int         @id @default(autoincrement())
+    order_id        Int
+    user_id         Int
+    vendor_id       Int?
+    reason          String
+    description     String?
+    return_type     String      // full, partial, exchange
+    refund_amount   Decimal     @default(0) @db.Decimal(10, 2)
+    status          String      @default("pending") // pending, approved, rejected, shipped, received, completed
+    deleted_at      DateTime?
+    created_at      DateTime    @default(now())
+    updated_at      DateTime?   @updatedAt
+
+    // Relations
+    order           orders      @relation(fields: [order_id], references: [id])
+    user            users       @relation(fields: [user_id], references: [id])
+    vendor          vendors?    @relation(fields: [vendor_id], references: [id])
+    items           return_items[]
+}
+
+model return_items {
+    id              Int         @id @default(autoincrement())
+    return_id       Int
+    order_item_id   Int
+    quantity        Int
+    created_at      DateTime    @default(now())
+
+    // Relations
+    return          returns     @relation(fields: [return_id], references: [id], onDelete: Cascade)
+}
+
+// ===============================================
+// REVIEWS & RATINGS
+// ===============================================
+
+model reviews {
+    id              Int         @id @default(autoincrement())
+    product_id      Int
+    user_id         Int
+    order_id        Int?
+    rating          Int         @default(5)
+    title           String?
+    comment         String?
+    status          String      @default("pending") // pending, approved, rejected
+    verified_purchase Boolean   @default(false)
+    helpful_count   Int         @default(0)
+    deleted_at      DateTime?
+    created_at      DateTime    @default(now())
+    updated_at      DateTime?   @updatedAt
+
+    // Relations
+    product         products    @relation(fields: [product_id], references: [id], onDelete: Cascade)
+    user            users       @relation(fields: [user_id], references: [id])
+}
+
+// ===============================================
+// SUPPORT & NOTIFICATIONS
+// ===============================================
+
+model support_tickets {
+    id              Int         @id @default(autoincrement())
+    ticket_number   String      @unique
+    subject         String
+    category        String?
+    priority        String      @default("normal") // low, normal, high, urgent
+    status          String      @default("open") // open, in_progress, resolved, closed, reopened
+    user_id         Int?
+    vendor_id       Int?
+    created_at      DateTime    @default(now())
+    updated_at      DateTime?   @updatedAt
+
+    // Relations
+    user            users?      @relation(fields: [user_id], references: [id])
+    vendor          vendors?    @relation(fields: [vendor_id], references: [id])
+    replies         support_ticket_replies[]
+}
+
+model support_ticket_replies {
+    id              Int         @id @default(autoincrement())
+    ticket_id       Int
+    user_id         Int
+    message         String
+    attachment      String?
+    created_at      DateTime    @default(now())
+    updated_at      DateTime?   @updatedAt
+
+    // Relations
+    ticket          support_tickets @relation(fields: [ticket_id], references: [id], onDelete: Cascade)
+    user            users       @relation(fields: [user_id], references: [id])
+}
+
+model notifications {
+    id              Int         @id @default(autoincrement())
+    user_id         Int
+    type            String      // order, payment, return, shipment, etc
+    title           String
+    message         String
+    metadata        String?     // JSON data
+    read_at         DateTime?
+    created_at      DateTime    @default(now())
+
+    // Relations
+    user            users       @relation(fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+model activity_logs {
+    id              Int         @id @default(autoincrement())
+    user_id         Int
+    action          String
+    details         String?     // JSON data
+    created_at      DateTime    @default(now())
+
+    // Relations
+    user            users       @relation(fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+// ===============================================
+// SETTINGS
+// ===============================================
+
+model vendor_settings {
+    id                      Int         @id @default(autoincrement())
+    vendor_id               Int         @unique
+    site_name               String?
+    phone_one               String?
+    phone_two               String?
+    email                   String?
+    twitter                 String?
+    instagram               String?
+    linkedIn                String?
+    snapchat                String?
+    terms_and_conditions    String?
+    privacy_policy          String?
+    created_at              DateTime    @default(now())
+    updated_at              DateTime?   @updatedAt
+
+    // Relations
+    vendor                  vendors     @relation(fields: [vendor_id], references: [id], onDelete: Cascade)
+}
+
+// ===============================================
+// REFERENCE DATA
+// ===============================================
+
+model countries {
+    id              Int         @id @default(autoincrement())
+    name            String      @unique
+    code            String      @unique
+    currency        String?
+    created_at      DateTime    @default(now())
+}
+
+model currencies {
+    id              Int         @id @default(autoincrement())
+    code            String      @unique
+    name            String
+    symbol          String?
+    exchange_rate   Decimal     @db.Decimal(10, 4)
+    created_at      DateTime    @default(now())
 }

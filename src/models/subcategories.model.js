@@ -2,7 +2,6 @@ import pool from "#services/pg_pool.js";
 
 export class Subcategory {
     static async create(data) {
-        console.log('Creating subcategory with data:', data);
         const { name, category_id, image, description } = data;
         const slug = name.toLowerCase().replace(/\s+/g, '-');
         const result = await pool.query(`
@@ -45,8 +44,17 @@ export class Subcategory {
         return rows[0] ?? null; 
     }
 
-    static async fetchById(subcategoryId, vendorId) {
-        console.log('Fetching subcategory by ID:', { subcategoryId, vendorId });
+    static async fetch(limit = 10, offset = 0) {
+        const { rows } = await pool.query(`
+            SELECT * FROM subcategories
+            ORDER BY created_at DESC
+            LIMIT $1 OFFSET $2`,
+            [limit, offset]
+        );
+        return rows[0] ?? null;
+    }
+
+    static async fetchById(subcategoryId) {
         const { rows } = await pool.query(`
             SELECT * FROM subcategories
             WHERE id = $1

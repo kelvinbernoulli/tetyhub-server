@@ -117,8 +117,8 @@ export class UserModel {
         }
     }
 
-    static async createUser(data, vendorId = null) {
-        console.log("Creating user with data:", data, "and vendorId:", vendorId);
+    static async createUser(data) {
+        console.log("Creating user with data:", data);
         const client = await pool.connect();
 
         try {
