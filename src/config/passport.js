@@ -57,7 +57,7 @@ passport.use(
                             profile.id,
                             true,
                             password,
-                            3,
+                            "customer",
                             true,
                             new Date().toISOString()
                         ]

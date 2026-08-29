@@ -10,6 +10,8 @@ import { decrypt } from "#utils/encryption.js";
 import pool from "#services/pg_pool.js";
 import passport from '#config/passport.js';
 
+const SESSION_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
+
 export const userSignup = async (req, res) => {
     try {
         const { body } = req;
@@ -146,15 +148,22 @@ export const userSignin = async (req, res) => {
             return respondWithError(res, 401, 'Invalid password', ERROR_CODES.INVALID_CREDENTIALS);
         }
 
+        delete user.password;
+
+        req.session.user = { ...user };
+
         await new Promise((resolve, reject) => {
-            req.session.regenerate((err) => (err ? reject(err) : resolve()));
+            req.session.save((err) => (err ? reject(err) : resolve()));
         });
 
-        req.session.user = {
-            ...user
-        };
+        await redisClient.sAdd(`user_sessions:${user.id}`, req.sessionID);
+        await redisClient.expire(`user_sessions:${user.id}`, SESSION_MAX_AGE / 1000);
 
-        return respondWithSuccess(res, 200, 'Login successful', user);
+        return respondWithSuccess(res, 200, 'Login successful', {
+            ...user,
+            sessionId: req.sessionID,
+            expiresAt: req.session.cookie.expires
+        });
     } catch (error) {
         console.error(error);
         return respondWithError(res, 500, 'Internal server error', ERROR_CODES.INTERNAL_SERVER_ERROR);
@@ -186,9 +195,16 @@ export const googleAuthCallback = (req, res, next) => {
             }
 
             await new Promise((resolve, reject) => {
-                req.session.regenerate((err) => (err ? reject(err) : resolve()));
+                req.session.save((err) => (err ? reject(err) : resolve()));
             });
 
+            delete user.password;
+
+            return respondWithSuccess(res, 200, 'Google authentication successful', {
+                ...user,
+                sessionId: req.sessionID,
+                expiresAt: req.session.cookie.expires
+            });
         }
         )(req, res, next);
     } catch (error) {
@@ -288,12 +304,64 @@ export const refreshSession = async (req, res) => {
             return respondWithError(res, 401, 'No active session found.', ERROR_CODES.UNAUTHORIZED);
         }
 
-        req.session._garbage = Date();
         req.session.touch();
 
-        return respondWithSuccess(res, 200, 'Session refreshed', {
-            expiresAt: new Date(Date.now() + req.session.cookie.maxAge)
+        await new Promise((resolve, reject) => {
+            req.session.save((err) => (err ? reject(err) : resolve()));
         });
+
+        // Keep the session index TTL in sync
+        await redisClient.expire(`user_sessions:${req.session.user.id}`, SESSION_MAX_AGE / 1000);
+
+        return respondWithSuccess(res, 200, 'Session refreshed', {
+            expiresAt: req.session.cookie.expires
+        });
+    } catch (error) {
+        console.error(error);
+        return respondWithError(res, 500, 'Internal server error', ERROR_CODES.INTERNAL_SERVER_ERROR);
+    }
+};
+
+export const getUserSessions = async (req, res) => {
+    try {
+        const { session } = req;
+        const user = session?.user;
+
+        const sessionIds = await redisClient.sMembers(`user_sessions:${user.id}`);
+        if (!sessionIds.length) {
+            return respondWithSuccess(res, 200, 'No active sessions', []);
+        }
+
+        const keys = sessionIds.map((id) => `sess:${id}`);
+        const values = await redisClient.mGet(keys);
+
+        const userSessions = [];
+        const staleSessionIds = [];
+
+        values.forEach((data, index) => {
+            if (!data) {
+                staleSessionIds.push(sessionIds[index]); // session expired/gone but index still had it
+                return;
+            }
+            try {
+                const parsed = JSON.parse(data);
+                if (!parsed?.user) return;
+                userSessions.push({
+                    sessionId: sessionIds[index],
+                    user: parsed.user,
+                    expiresAt: parsed?.cookie?.expires || null
+                });
+            } catch {
+                staleSessionIds.push(sessionIds[index]);
+            }
+        });
+
+        // Lazily clean up any stale references so the index doesn't grow unbounded
+        if (staleSessionIds.length) {
+            await redisClient.sRem(`user_sessions:${user.id}`, staleSessionIds);
+        }
+
+        return respondWithSuccess(res, 200, 'User sessions retrieved', userSessions);
     } catch (error) {
         console.error(error);
         return respondWithError(res, 500, 'Internal server error', ERROR_CODES.INTERNAL_SERVER_ERROR);
@@ -302,10 +370,11 @@ export const refreshSession = async (req, res) => {
 
 export const getAllSessions = async (req, res) => {
     try {
-        const keys = [];
+        const rawKeys = [];
         for await (const key of redisClient.scanIterator({ MATCH: 'sess:*' })) {
-            keys.push(String(key)); // ensure keys are plain strings
+            rawKeys.push(key);
         }
+        const keys = rawKeys.flat().map(String);
 
         if (!keys.length) {
             return respondWithSuccess(res, 200, 'No active sessions', []);

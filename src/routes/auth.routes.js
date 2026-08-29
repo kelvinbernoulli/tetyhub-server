@@ -9,6 +9,7 @@ router.post('/resend-verification', AuthController.resendVerification);
 router.post("/signin", AuthController.userSignin);
 router.post("/refresh-session", authenticated, AuthController.refreshSession);
 router.get("/sessions", authenticated, AuthController.getAllSessions);
+router.get("/user/sessions", authenticated, AuthController.getUserSessions);
 router.post("/sessions/revoke/:sessionId", authenticated, AuthController.revokeSession);
 router.post("/signout", authenticated, AuthController.signOut);
 

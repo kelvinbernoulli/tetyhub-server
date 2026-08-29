@@ -42,7 +42,7 @@ model users {
     orders                     orders[]
     payments                   payments[]
     carts                      carts[]
-    wishlists                  wishlist_items[]
+    wishlists                  wishlists[]
     reviews                    reviews[]
     returns                    returns[]
     notifications              notifications[]
