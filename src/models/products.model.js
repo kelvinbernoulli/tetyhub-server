@@ -1105,7 +1105,7 @@ export class Product {
                 p.brand,
                 p.tags,
                 p.price,
-                p.currency,
+                p.currency_id,
                 p.compare_at_price,
                 p.cost_price,
                 p.discount,
@@ -1193,6 +1193,253 @@ export class Product {
 
             throw error;
 
+        } finally {
+            client.release();
+        }
+    }
+
+    static async fetchAll(offset = 0, limit = 20, filters = {}) {
+        const client = await pool.connect();
+
+        try {
+            const {
+                search,
+                category_id,
+                subcategory_id,
+                status,
+                is_featured,
+                is_digital,
+                min_price,
+                max_price,
+                sort_by = "created_at",
+                sort_order = "DESC"
+            } = filters;
+
+            /*
+            |--------------------------------------------------------------------------
+            | Sanitize Pagination Inputs
+            |--------------------------------------------------------------------------
+            */
+
+            const MAX_LIMIT = 100;
+            const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 20, 1), MAX_LIMIT);
+            const safeOffset = Math.max(parseInt(offset, 10) || 0, 0);
+            const page = Math.floor(safeOffset / safeLimit) + 1;
+
+            /*
+            |--------------------------------------------------------------------------
+            | Allowed Sort Columns
+            |--------------------------------------------------------------------------
+            */
+
+            const allowedSortColumns = [
+                "created_at",
+                "updated_at",
+                "name",
+                "price",
+                "stock"
+            ];
+
+            const allowedSortOrders = ["ASC", "DESC"];
+
+            const finalSortBy = allowedSortColumns.includes(sort_by)
+                ? sort_by
+                : "created_at";
+
+            const finalSortOrder = allowedSortOrders.includes(
+                String(sort_order).toUpperCase()
+            )
+                ? String(sort_order).toUpperCase()
+                : "DESC";
+
+            /*
+            |--------------------------------------------------------------------------
+            | Build WHERE Conditions
+            |--------------------------------------------------------------------------
+            */
+
+            const conditions = [];
+            const values = [];
+            let index = 1;
+
+            if (search) {
+                conditions.push(`
+                (
+                    p.name ILIKE $${index}
+                    OR p.description ILIKE $${index}
+                    OR p.brand ILIKE $${index}
+                )
+            `);
+                values.push(`%${search}%`);
+                index++;
+            }
+
+            if (category_id) {
+                conditions.push(`p.category_id = $${index}`);
+                values.push(category_id);
+                index++;
+            }
+
+            if (subcategory_id) {
+                conditions.push(`p.subcategory_id = $${index}`);
+                values.push(subcategory_id);
+                index++;
+            }
+
+            if (status) {
+                conditions.push(`p.status = $${index}`);
+                values.push(status);
+                index++;
+            }
+
+            if (is_featured !== undefined) {
+                conditions.push(`p.is_featured = $${index}`);
+                values.push(is_featured);
+                index++;
+            }
+
+            if (is_digital !== undefined) {
+                conditions.push(`p.is_digital = $${index}`);
+                values.push(is_digital);
+                index++;
+            }
+
+            if (min_price !== undefined) {
+                conditions.push(`p.price >= $${index}`);
+                values.push(min_price);
+                index++;
+            }
+
+            if (max_price !== undefined) {
+                conditions.push(`p.price <= $${index}`);
+                values.push(max_price);
+                index++;
+            }
+
+            // Always-true base clause so joining "AND" never leaves a dangling WHERE
+            const whereClause = conditions.length
+                ? `WHERE ${conditions.join(" AND ")}`
+                : "";
+
+            /*
+            |--------------------------------------------------------------------------
+            | Total Count Query
+            |--------------------------------------------------------------------------
+            */
+
+            const countQuery = `
+            SELECT COUNT(*)::INTEGER AS total
+            FROM products p
+            ${whereClause}
+        `;
+
+            const { rows: countRows } = await client.query(countQuery, values);
+            const total = countRows[0].total;
+
+            /*
+            |--------------------------------------------------------------------------
+            | Main Query
+            |--------------------------------------------------------------------------
+            */
+
+            const mainValues = [...values, safeLimit, safeOffset];
+            const limitIndex = index;
+            const offsetIndex = index + 1;
+
+            const query = `
+            SELECT
+                p.id,
+                p.vendor_id,
+                p.category_id,
+                p.subcategory_id,
+                p.name,
+                p.slug,
+                p.description,
+                p.short_description,
+                p.brand,
+                p.tags,
+                p.price,
+                p.currency_id,
+                p.compare_at_price,
+                p.cost_price,
+                p.discount,
+                p.stock,
+                p.low_stock_threshold,
+                p.track_inventory,
+                p.has_variants,
+                p.thumbnail,
+                p.weight,
+                p.length,
+                p.width,
+                p.height,
+                p.free_shipping,
+                p.status,
+                p.is_featured,
+                p.is_digital,
+                p.meta_title,
+                p.meta_description,
+                p.created_at,
+                p.updated_at,
+
+                c.name AS category_name,
+                sc.name AS subcategory_name,
+
+                (
+                    SELECT COUNT(*)
+                    FROM product_images pi
+                    WHERE pi.product_id = p.id
+                )::INTEGER AS image_count,
+
+                (
+                    SELECT COALESCE(
+                        JSON_AGG(
+                            JSON_BUILD_OBJECT(
+                                'id', pi.id,
+                                'url', pi.url,
+                                'position', pi.position,
+                                'is_primary', pi.is_primary
+                            )
+                            ORDER BY pi.position ASC
+                        ),
+                        '[]'
+                    )
+                    FROM product_images pi
+                    WHERE pi.product_id = p.id
+                ) AS images
+
+            FROM products p
+
+            LEFT JOIN categories c
+                ON c.id = p.category_id
+
+            LEFT JOIN categories sc
+                ON sc.id = p.subcategory_id
+
+            ${whereClause}
+
+            ORDER BY p.${finalSortBy} ${finalSortOrder}
+
+            LIMIT $${limitIndex}
+            OFFSET $${offsetIndex}
+        `;
+
+            const { rows } = await client.query(query, mainValues);
+
+            return {
+                data: rows,
+                pagination: {
+                    total,
+                    page,
+                    limit: safeLimit,
+                    total_pages: Math.ceil(total / safeLimit),
+                    has_next_page: page < Math.ceil(total / safeLimit),
+                    has_prev_page: page > 1
+                }
+            };
+
+        } catch (error) {
+            console.error("Error fetching products:", error);
+            throw error;
         } finally {
             client.release();
         }

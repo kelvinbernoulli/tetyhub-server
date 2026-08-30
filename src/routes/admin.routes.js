@@ -29,11 +29,11 @@ router.patch("/countries/update/:countryId", authenticated, canUpdate('countries
 router.delete("/countries/delete/:countryId", authenticated, canDelete('countries'), CountriesController.deleteCountry);
 
 //categories
-router.post("/categories/create", authenticated, canCreate('category'), CategoriesController.createCountry);
-router.get("/countries", pagination, CountriesController.fetchCountries);
-router.get("/countries/view/:countryId", CountriesController.fetchCountryById);
-router.patch("/countries/update/:countryId", authenticated, canUpdate('countries'), CountriesController.updateCountry);
-router.delete("/countries/delete/:countryId", authenticated, canDelete('countries'), CountriesController.deleteCountry);
+router.post("/categories/create", authenticated, canCreate('category'), CategoriesController.createCategory);
+router.get("/categories", pagination, CategoriesController.fetchCategories);
+router.get("/category/view/:Id", CategoriesController.fetchCategoryById);
+router.patch("/category/update/:Id", authenticated, canUpdate('countries'), CategoriesController.updateCategory);
+router.delete("/category/delete/Id", authenticated, canDelete('countries'), CategoriesController.deleteCategory);
 
 //support tickets
 router.post("/support-tickets/create", authenticated, canCreate('support'), supportTicketsController.createSupportTicket);

@@ -48,7 +48,7 @@ export class Category {
         const result = await pool.query(`
             SELECT * FROM categories
             ORDER BY created_at DESC
-            LIMIT $2 OFFSET $3`,
+            LIMIT $1 OFFSET $2`,
             [limit, offset]
         );
         return result;

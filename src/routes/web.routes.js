@@ -8,7 +8,7 @@ import * as ReturnController from "#controllers/return.controller.js";
 import * as WishlistController from "#controllers/wishlist.controller.js";
 import * as UsersController from "#controllers/users.controller.js";
 import * as CountriesController from "#controllers/countries.controller.js";
-import * as PaymentController from "#controllers/payment.controller.js";
+import * as CategoriesController from "#controllers/categories.controller.js";
 import * as TransactionHistoryController from "#controllers/transaction.history.controller.js";
 import * as NotificationController from "#controllers/notification.controller.js";
 import * as CouponsController from "#controllers/coupon.controller.js";
@@ -28,16 +28,18 @@ router.get("/settings", pagination, SettingsController.fetchGeneralSettings);
 //countries
 router.get("/countries", CountriesController.fetchCountries);
 
+router.get("/categories", pagination, CategoriesController.fetchCategories);
+
 //coupons
 router.get("/coupons", pagination, CouponsController.fetchCoupons);
 
 //products
-router.get("/products", authenticated, pagination, ProductController.fetchProducts);
-router.get("/product/:productId", authenticated, ProductController.fetchProductById);
-router.get("/products/search", authenticated, pagination, ProductController.searchProducts);
-router.get("/products/filters", authenticated, ProductController.getFilters);
-router.get("/products/related/:productId", authenticated, pagination, ProductController.getRelatedProducts);
-router.get("/products/featured", authenticated, pagination, ProductController.getFeaturedProducts);
+router.get("/products", pagination, ProductController.fetchProducts);
+router.get("/product/:productId", ProductController.fetchProductById);
+router.get("/products/search", pagination, ProductController.searchProducts);
+router.get("/products/filters", ProductController.getFilters);
+router.get("/products/related/:productId", pagination, ProductController.getRelatedProducts);
+router.get("/products/featured", pagination, ProductController.getFeaturedProducts);
 
 //cart
 router.post("/cart/items/add", authenticated, isCustomer, CartController.addToCart);

@@ -12,19 +12,19 @@ import { fetch_one_by_key } from "#models/query.model.js";
 
 const PRODUCT_CACHE_TTL_SECONDS = Number(process.env.PRODUCT_CACHE_TTL_SECONDS) || 60;
 
-const getProductListCacheKey = (vendorId, offset, limit) => `vendor:${vendorId}:products:offset:${offset}:limit:${limit}`;
-const getProductCacheKey = (vendorId, productId) => `vendor:${vendorId}:product:${productId}`;
+const getProductListCacheKey = (offset, limit) => `products:offset:${offset}:limit:${limit}`;
+const getProductCacheKey = (productId) => `product:${productId}`;
 
-const invalidateProductCache = async (vendorId, productId = null) => {
+const invalidateProductCache = async (productId) => {
     try {
         const keys = [];
-        const listKeys = await redisClient.keys(`vendor:${vendorId}:products*`);
+        const listKeys = await redisClient.keys(`products*`);
         if (listKeys?.length) {
             keys.push(...listKeys);
         }
 
         if (productId) {
-            keys.push(getProductCacheKey(vendorId, productId));
+            keys.push(getProductCacheKey(productId));
         }
 
         if (keys.length) {
@@ -48,41 +48,31 @@ export const createProduct = async (req, res) => {
             return respondWithError(res, 401, 'Unauthorized', ERROR_CODES.UNAUTHORIZED);
         }
 
-        const isVendor = user.role === 'vendor';
-        if (!isVendor) {
-            return respondWithError(res, 403, 'Forbidden', ERROR_CODES.FORBIDDEN);
-        }
-
-        const duplicate = await Product.findByKey([{ key: 'name', value: value.name }], user.id);
-        if (duplicate) {
-            return respondWithError(res, 409, 'A product with this name already exists', ERROR_CODES.CONFLICT);
-        }
-
         const category = await Category.fetchById(value.category_id);
         if (!category) {
-            return respondWithError(res, 422, 'Invalid category ID', ERROR_CODES.VALIDATION_ERROR);
+            return respondWithError(res, 422, 'Invalid category', ERROR_CODES.VALIDATION_ERROR);
         }
 
         if (value.subcategory_id) {
             const subcategory = await Subcategory.fetchById(value.subcategory_id);
             if (!subcategory) {
-                return respondWithError(res, 422, 'Invalid subcategory ID', ERROR_CODES.VALIDATION_ERROR);
+                return respondWithError(res, 422, 'Invalid subcategory', ERROR_CODES.VALIDATION_ERROR);
             }
         }
 
         const currencyData = await fetch_one_by_key('currencies', 'id', value.currency_id);
         if (!currencyData) {
-            return respondWithError(res, 422, 'Invalid currency ID', ERROR_CODES.VALIDATION_ERROR);
+            return respondWithError(res, 422, 'Invalid currency', ERROR_CODES.VALIDATION_ERROR);
         }
 
         const result = await Product.create(user.id, value);
         if (!result) {
-            return respondWithError(res, 400, 'Failed to create product', ERROR_CODES.RESOURCE_CREATION_FAILED);
+            return respondWithError(res, 400, 'Failed to add product', ERROR_CODES.OPERATION_FAILED);
         }
 
-        await invalidateProductCache(user.id, result.id);
+        await invalidateProductCache(result.id);
 
-        return respondWithSuccess(res, 201, 'Product created successfully', result);
+        return respondWithSuccess(res, 201, 'Product added successfully', result);
 
     } catch (err) {
         console.error("Error creating product:", err);
@@ -132,7 +122,7 @@ export const updateProduct = async (req, res) => {
         return respondWithError(res, 400, "Failed to update product", ERROR_CODES.RESOURCE_UPDATE_FAILED);
     }
 
-    await invalidateProductCache(user.id, id);
+    await invalidateProductCache(id);
     
     return respondWithSuccess(res, 200, "Product updated successfully", updatedProduct);
 } catch (error) {
@@ -146,14 +136,10 @@ export const fetchProducts = async (req, res) => {
         const user = req.session?.user;
         const vendorId = user?.role === ROLES.VENDOR ? user.id : user?.vendor_id;
 
-        if (!vendorId) {
-            return respondWithError(res, 403, 'Forbidden: Vendor information not found', ERROR_CODES.FORBIDDEN);
-        }
-
-        const { offset = 0, limit = 20 } = req.pagination ?? {};
+        const { offset, limit } = req.pagination;
         const filters = req.query;
 
-        const cacheKey = await getProductListCacheKey(vendorId, offset, limit, filters);
+        const cacheKey = getProductListCacheKey(offset, limit);
 
         // 1. Try cache
         const cached = await redisClient.get(cacheKey).catch((err) => {
@@ -166,7 +152,7 @@ export const fetchProducts = async (req, res) => {
         }
 
         // 2. Fetch from DB
-        const products = await Product.findAllByVendor(vendorId, { offset, limit, filters });
+        const products = await Product.fetchAll({ offset, limit, filters });
 
         // 3. Store in cache — fire and forget, never block the response
         redisClient

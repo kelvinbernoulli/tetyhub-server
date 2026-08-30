@@ -17,8 +17,8 @@ import { dirname } from "path";
 import auth from "#routes/auth.routes.js";
 // import admin from "#routes/admin.routes.js";
 // import user from "#routes/user.routes.js";
-// import vendor from "#routes/vendor.routes.js";
-// import web from "#routes/web.routes.js";
+import vendor from "#routes/vendor.routes.js";
+import web from "#routes/web.routes.js";
 import passport from 'passport';
 import sessionMiddleware from '#config/session.js';
 
@@ -81,8 +81,8 @@ app.use("/assets", express.static(path.join(__dirname, "assets")));
 app.use(`/${APP_VERSION}/api/auth`, auth);
 // app.use(`/${APP_VERSION}/api/admin`, admin);
 // app.use(`/${APP_VERSION}/api/user`, user);
-// app.use(`/${APP_VERSION}/api/vendor`, vendor);
-// app.use(`/${APP_VERSION}/api`, web);
+app.use(`/${APP_VERSION}/api/vendor`, vendor);
+app.use(`/${APP_VERSION}/api`, web);
 
 // Root — UA parser (consider removing or restricting in production)
 app.get("/", (req, res) => {
