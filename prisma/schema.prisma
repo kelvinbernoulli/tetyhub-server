@@ -195,10 +195,29 @@ model subcategories {
     updated_at      DateTime?   @updatedAt
 
     // Relations
-    category        categories  @relation(fields: [category_id], references: [id], onDelete: Cascade)
-    products        products[]
+    category              categories  @relation(fields: [category_id], references: [id], onDelete: Cascade)
+    child_subcategory     child_subcategories  []
+    products              products[]
 
     @@unique([category_id, slug])
+}
+
+model child_subcategories {
+    id                  Int         @id @default(autoincrement())
+    subcategory_id      Int
+    name                String
+    slug                String
+    description         String?
+    image               String?
+    status              Boolean     @default(true)
+    created_at          DateTime    @default(now())
+    updated_at          DateTime?   @updatedAt
+
+    // Relations
+    subcategory         subcategories  @relation(fields: [subcategory_id], references: [id], onDelete: Cascade)
+    products            products[]
+
+    @@unique([subcategory_id, slug])
 }
 
 model products {
@@ -206,6 +225,7 @@ model products {
     vendor_id           Int
     category_id         Int
     subcategory_id      Int?
+    child_subcategory_id      Int?
     name                String
     slug                String
     description         String?
@@ -239,6 +259,7 @@ model products {
     vendor              vendors         @relation(fields: [vendor_id], references: [id], onDelete: Cascade)
     category            categories      @relation(fields: [category_id], references: [id])
     subcategory         subcategories?  @relation(fields: [subcategory_id], references: [id])
+    child_subcategory    child_subcategories?  @relation(fields: [child_subcategory_id], references: [id])
     currency            currencies      @relation(fields: [currency_id], references: [id])
     images              product_images[]
     variants            product_variants[]

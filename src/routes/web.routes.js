@@ -9,6 +9,7 @@ import * as WishlistController from "#controllers/wishlist.controller.js";
 import * as UsersController from "#controllers/users.controller.js";
 import * as CountriesController from "#controllers/countries.controller.js";
 import * as CategoriesController from "#controllers/categories.controller.js";
+import * as SubcategoriesController from "#controllers/subcategories.controller.js";
 import * as TransactionHistoryController from "#controllers/transaction.history.controller.js";
 import * as NotificationController from "#controllers/notification.controller.js";
 import * as CouponsController from "#controllers/coupon.controller.js";
@@ -28,7 +29,11 @@ router.get("/settings", pagination, SettingsController.fetchGeneralSettings);
 //countries
 router.get("/countries", CountriesController.fetchCountries);
 
+//categories
 router.get("/categories", pagination, CategoriesController.fetchCategories);
+
+//subcategories
+router.get("/subcategories", pagination, SubcategoriesController.fetchSubcategories);
 
 //coupons
 router.get("/coupons", pagination, CouponsController.fetchCoupons);

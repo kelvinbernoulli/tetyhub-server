@@ -44,14 +44,14 @@ export class Subcategory {
         return rows[0] ?? null; 
     }
 
-    static async fetch(limit = 10, offset = 0) {
+    static async fetch({limit = 10, offset = 0}) {
         const { rows } = await pool.query(`
             SELECT * FROM subcategories
             ORDER BY created_at DESC
             LIMIT $1 OFFSET $2`,
             [limit, offset]
         );
-        return rows[0] ?? null;
+        return rows ?? null;
     }
 
     static async fetchById(subcategoryId) {

@@ -23,13 +23,13 @@ export const createCategory = async (req, res) => {
             return respondWithError(res, 409, 'Category already exists', ERROR_CODES.DUPLICATE_RESOURCE);
         }
 
-        let filename = null;
+        let upload = null;
         if (image) {
-            filename = `images/category-images/${name}.${getBase64Extension(image)}`;
-            await S3upload(image, filename);
+            const filename = `images/category-images/${name}.${getBase64Extension(image)}`;
+            upload = await S3upload(image, filename);
         }
 
-        const result = await Category.create({ name, description, image: filename});
+        const result = await Category.create({ name, description, image: upload.url });
         if (result.rowCount === 0) {
             return respondWithError(res, 400, 'Failed to create category', ERROR_CODES.RESOURCE_CREATE_FAILED);
         }
@@ -79,7 +79,7 @@ export const updateCategory = async (req, res) => {
                 S3upload(image, `images/category-images/${name ?? existingCategory.name}.${getBase64Extension(image)}`),
                 existingCategory.image ? S3delete(existingCategory.image) : Promise.resolve()
             ]);
-            imageUrl = uploadedUrl;
+            imageUrl = uploadedUrl.url;
         }
 
         value.image = imageUrl;

@@ -16,8 +16,9 @@ export const sessionMiddleware = session({
     rolling: true,              // reset TTL on every active request
     cookie: {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
+        // secure: process.env.NODE_ENV === 'production',
+        secure: 'true',
+        sameSite: 'none',
         maxAge: SESSION_MAX_AGE,
     },
 });

@@ -1,21 +1,21 @@
 import pool from '#services/pg_pool.js';
 
-export class Category {
+export class ChildSubcategory {
 
-    static async create({ name, description, image }) {
+    static async create({ name, description, image, subcategory_id }) {
         const slug = name.toLowerCase().replace(/\s+/g, '-');
         const result = await pool.query(`
-            INSERT INTO categories
-                (name, slug, description, image, status)
-            VALUES ($1, $2, $3, $4, $5)
+            INSERT INTO child_subcategories
+                (name, slug, subcategory_id, description, image, status)
+            VALUES ($1, $2, $3, $4, $5, $6)
             RETURNING *`,
-            [name, slug, description ?? null, image ?? null, true]
+            [name, slug, subcategory_id, description ?? null, image ?? null, true]
         );
         return result;
     }
 
-    static async update(categoryId, value) {
-        const allowed = ['name', 'description', 'image', 'status'];
+    static async update(childsubcategoryId, value) {
+        const allowed = ['name', 'subcategory_id', 'description', 'image', 'status'];
         const fields = [];
         const values = [];
 
@@ -34,11 +34,11 @@ export class Category {
         const idIdx = fields.length + 1;
 
         const { rows } = await pool.query(`
-            UPDATE categories
+            UPDATE child_subcategories
             SET ${fields.join(', ')}, updated_at = NOW()
             WHERE id = $${idIdx}
             RETURNING *`,
-            [...values, categoryId]
+            [...values, childsubcategoryId]
         );
 
         return rows[0] ?? null; // null = not found or already deleted
@@ -46,7 +46,7 @@ export class Category {
 
     static async fetch({ limit = 20, offset = 0 } = {}) {
         const result = await pool.query(`
-            SELECT * FROM categories
+            SELECT * FROM child_subcategories
             ORDER BY created_at DESC
             LIMIT $1 OFFSET $2`,
             [limit, offset]
@@ -54,36 +54,25 @@ export class Category {
         return result;
     }
 
-    static async duplicateCheck(categoryName) {
+    static async fetchById(childsubcategoryId) {
         const { rows } = await pool.query(`
-            SELECT * FROM categories
-            WHERE name = $1
-            LIMIT 1`,
-            [categoryName]
-        );
-        return rows[0] ?? null;
-    }
-
-
-    static async fetchById(categoryId) {
-        const { rows } = await pool.query(`
-            SELECT * FROM categories
+            SELECT * FROM child_subcategories
             WHERE id = $1 
             LIMIT 1`,
-            [categoryId]
+            [childsubcategoryId]
         );
         return rows[0] ?? null;
     }
 
-    static async delete(categoryId) {
+    static async delete(childsubcategoryId) {
         const { rows } = await pool.query(`
-            DELETE categories
+            DELETE FROM child_subcategories
             WHERE id = $1
             RETURNING id`,
-            [categoryId]
+            [childsubcategoryId]
         );
         return rows[0] ?? null;
     }
 }
 
-export default Category;
+export default ChildSubcategory;

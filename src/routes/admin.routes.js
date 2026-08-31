@@ -29,11 +29,25 @@ router.patch("/countries/update/:countryId", authenticated, canUpdate('countries
 router.delete("/countries/delete/:countryId", authenticated, canDelete('countries'), CountriesController.deleteCountry);
 
 //categories
-router.post("/categories/create", authenticated, canCreate('category'), CategoriesController.createCategory);
-router.get("/categories", pagination, CategoriesController.fetchCategories);
-router.get("/category/view/:Id", CategoriesController.fetchCategoryById);
-router.patch("/category/update/:Id", authenticated, canUpdate('countries'), CategoriesController.updateCategory);
-router.delete("/category/delete/Id", authenticated, canDelete('countries'), CategoriesController.deleteCategory);
+router.post("/category/create", authenticated, CategoriesController.createCategory);
+router.get("/categories", authenticated, pagination, CategoriesController.fetchCategories);
+router.get("/category/view/:categoryId", authenticated, CategoriesController.fetchCategoryById);
+router.patch("/category/update/:categoryId", authenticated, CategoriesController.updateCategory);
+router.delete("/category/delete/:categoryId", authenticated, CategoriesController.deleteCategory);
+
+//subcategories
+router.post("/subcategory/create", authenticated, SubcategoriesController.createSubcategory);
+router.get("/subcategories", authenticated, pagination, SubcategoriesController.fetchSubcategories);
+router.get("/subcategory/view/:subcategoryId", authenticated, SubcategoriesController.fetchSubcategoryById);
+router.patch("/subcategory/update/:subcategoryId", authenticated, SubcategoriesController.updateSubcategory);
+router.delete("/subcategory/delete/:subcategoryId", authenticated, SubcategoriesController.deleteSubcategory);
+
+//sub-subcategories
+router.post("/sub-subcategory/create", authenticated, SubcategoriesController.createSubcategory);
+router.get("/sub-subcategories", authenticated, pagination, SubcategoriesController.fetchSubcategories);
+router.get("/sub-subcategory/view/:subSubcategoryId", authenticated, SubcategoriesController.fetchSubcategoryById);
+router.patch("/sub-subcategory/update/:subSubcategoryId", authenticated, SubcategoriesController.updateSubcategory);
+router.delete("/sub-subcategory/delete/:subSubcategoryId", authenticated, SubcategoriesController.deleteSubcategory);
 
 //support tickets
 router.post("/support-tickets/create", authenticated, canCreate('support'), supportTicketsController.createSupportTicket);
@@ -49,7 +63,7 @@ router.patch("/settings/upsert", authenticated, canUpdate('settings'), settingsC
 //admin types
 router.post("/admin-types/create", canCreate('admin_types'), AdminTypesController.createAdminTypes);
 router.get("/admin-types", pagination, isAllAdmin, authenticated, AdminTypesController.fetchAdminTypes);
-router.get("/admin-types/view/:id", isAllAdmin, authenticated, AdminTypesController.fetchAdminType);
+router.get("/admin-types/view/:id", isAllAdmin, authenticated, AdminTypesController.viewAdminType);
 router.patch("/admin-types/update/:id", canUpdate('admin_types'), AdminTypesController.updateAdminTypes);
 router.delete("/admin-types/delete/:id", canDelete('admin_types'), AdminTypesController.deleteAdminType);
 

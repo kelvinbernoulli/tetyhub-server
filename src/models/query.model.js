@@ -344,8 +344,8 @@ export const duplicate_check_by_columns = async (tableName, columns, values) => 
 
     const { rows } = await pool.query(
         `SELECT id FROM ${tableName}
-     WHERE ${conditions.join(' OR ')}
-     LIMIT 1`,
+        WHERE ${conditions.join(' OR ')}
+        LIMIT 1`,
         values
     );
 
