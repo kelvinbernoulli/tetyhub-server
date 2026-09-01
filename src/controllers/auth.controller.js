@@ -2,7 +2,7 @@ import Auth from "#models/auth.model.js";
 import UserModel from "#models/user.model.js";
 import { loginSchema, registerSchema } from "#schemas/auth.schema.js";
 import ERROR_CODES from "#utils/error.codes.js";
-import { buildRedisKey, normalizePhone, passwordHash, ROLES, validatePassword, verifyPassword } from "#utils/helpers.js";
+import { buildRedisKey, frontendBase, normalizePhone, passwordHash, ROLES, validatePassword, verifyPassword } from "#utils/helpers.js";
 import CustomerModel from "#models/customer.model.js";
 import { respondWithError, respondWithSuccess } from "#utils/response.js";
 import redisClient from "#config/redis.js";
@@ -187,24 +187,26 @@ export const googleAuthCallback = (req, res, next) => {
         passport.authenticate("google", { session: true }, async (err, user, info) => {
             if (err) {
                 console.error("Google authentication error:", err);
-                return respondWithError(res, 500, "Internal Server Error during Google authentication", ERROR_CODES.INTERNAL_SERVER_ERROR);
+                return res.redirect(`${frontendBase}/login?error=server_error`);
             }
 
             if (!user) {
-                return respondWithError(res, 401, "Google authentication failed", ERROR_CODES.GOOGLE_AUTHENTICATION_FAILED);
+                return res.redirect(`${frontendBase}/login?error=google_auth_failed`);
             }
+
+            delete user.password;
+
+            req.session.user = { ...user };
 
             await new Promise((resolve, reject) => {
                 req.session.save((err) => (err ? reject(err) : resolve()));
             });
 
-            delete user.password;
-
-            return respondWithSuccess(res, 200, 'Google authentication successful', {
-                ...user,
-                sessionId: req.sessionID,
-                expiresAt: req.session.cookie.expires
-            });
+            if (user.role === ROLES.CUSTOMER) {
+                return res.redirect(`${frontendBase}`);
+            } else {
+                return res.redirect(`${frontendBase}/dashboard`);
+            }
         }
         )(req, res, next);
     } catch (error) {

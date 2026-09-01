@@ -92,7 +92,7 @@ export const updateAdmin = async (req, res) => {
             }
         }
 
-        const result = await UserModel.updateAdmin(id, body);
+        const result = await UserModel.updateAdmin(id, value);
 
         if (!result) {
             return respondWithError(res, 500, "Failed to update admin", ERROR_CODES.RESOURCE_UPDATE_FAILED);
@@ -102,7 +102,7 @@ export const updateAdmin = async (req, res) => {
 
     } catch (error) {
         console.error("Error updating admin:", error);
-        return respondWithError(res, 500, error.message || 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);
+        return respondWithError(res, 500, 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);
     }
 };
 

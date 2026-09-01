@@ -183,14 +183,4 @@ export const generateOrderReference = (orderId) => {
     return `ORD-${orderId}-${Date.now()}`;
 };
 
-export const vendorID = (user) => {
-    let vendorId = null;
-    if (user.role === ROLES.VENDOR) {
-        vendorId = user.id;
-    } else if (user.role === ROLES.VENDOR_ADMIN) {
-        vendorId = user.vendor_id;
-    } else if (user.role === ROLES.CUSTOMER) {
-        vendorId = user.vendor_id;
-    }
-    return vendorId;
-}
+export const frontendBase = process.env.NODE_ENV === 'production' ? process.env.FRONTEND_URL : process.env.FRONTEND_DEV_URL;

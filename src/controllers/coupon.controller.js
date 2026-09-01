@@ -1,7 +1,6 @@
 import Coupon from '#models/coupons.model.js';
 import { createCouponSchema, updateCouponSchema } from '#schemas/coupons.schema.js';
 import ERROR_CODES from '#utils/error.codes.js';
-import { vendorID } from '#utils/helpers.js';
 import { respondWithError, respondWithSuccess } from '#utils/response.js';
 
 export const createCoupon = async (req, res) => {
