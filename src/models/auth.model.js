@@ -1,13 +1,11 @@
 import redisClient from "#config/redis.js";
 import pool from "#services/pg_pool.js";
 import { encrypt } from "#utils/encryption.js";
-import { buildRedisKey, generateOTP, ROLES } from "#utils/helpers.js";
+import { buildRedisKey, frontendBase, generateOTP, ROLES } from "#utils/helpers.js";
 import { sendAdminRegistrationEmail, sendEmailVerificationLink, sendPasswordResetLink } from "./mail.model.js";
 import { select_by_keys } from "./query.model.js";
 import { config } from "dotenv";
 config();
-
-const frontendBase = process.env.NODE_ENV === 'production' ? process.env.FRONTEND_URL : process.env.FRONTEND_DEV_URL;
 
 export class Auth {
     static async activateAccount(id) {
@@ -70,6 +68,7 @@ export class Auth {
         // Match buildRedisKey format
         const redisKey = buildRedisKey(user.email, 'password_reset');
         await redisClient.set(redisKey, code.toString(), { EX: 600 }); // 10 minutes expiration
+console.log("frontend url:", frontendBase);
 
         const link = new URL('/forgot-password', frontendBase);
         link.searchParams.set('token', encryptedCode);
