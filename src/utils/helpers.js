@@ -3,6 +3,8 @@ import pkg from 'hi-base32';
 import bcrypt from "bcrypt";
 import { validationResult } from 'express-validator';
 const { encode } = pkg;
+import { config } from "dotenv";
+config();
 
 // generate otp code
 export const generateOTP = async () => {
