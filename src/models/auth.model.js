@@ -7,6 +7,8 @@ import { select_by_keys } from "./query.model.js";
 import { config } from "dotenv";
 config();
 
+const frontendBase = process.env.NODE_ENV === 'production' ? process.env.FRONTEND_URL : process.env.FRONTEND_DEV_URL;
+
 export class Auth {
     static async activateAccount(id) {
         const { rows } = await pool.query(
@@ -36,10 +38,10 @@ export class Auth {
         const redisKey = buildRedisKey(user.email, 'email_verification');
         await redisClient.set(redisKey, code.toString(), { EX: 600 }); // 10 minutes expiration
 
-        const link = new URL('/v1/api/auth/verify-email', process.env.PROD_URL);
+        const link = new URL('//verify-email', frontendBase);
         link.searchParams.set('token', encryptedCode);
         link.searchParams.set('email', user.email);
-        
+
         await sendEmailVerificationLink(user, link.toString());
         console.log("Verification link:", link.toString());
         return { success: true, message: 'Verification email sent' };
@@ -69,7 +71,7 @@ export class Auth {
         const redisKey = buildRedisKey(user.email, 'password_reset');
         await redisClient.set(redisKey, code.toString(), { EX: 600 }); // 10 minutes expiration
 
-        const link = new URL('/v1/api/auth/password-reset/confirm', process.env.PROD_URL);
+        const link = new URL('/forgot-password', frontendBase);
         link.searchParams.set('token', encryptedCode);
         link.searchParams.set('email', user.email);
 

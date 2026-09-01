@@ -274,7 +274,9 @@ export const confirmPasswordReset = async (req, res) => {
             return respondWithError(res, 422, "Password does not meet the requirements; it must be at least 8 characters long and contain a mix of uppercase, lowercase, numbers, and special characters.", ERROR_CODES.VALIDATION_ERROR);
         }
 
-        const comparePassword = await verifyPassword(new_password, stored);
+        const user = await UserModel.getUserByEmail(email);
+
+        const comparePassword = await verifyPassword(new_password, user.password);
         if (comparePassword) {
             return respondWithError(res, 400, 'New password cannot be the same as the old password', ERROR_CODES.VALIDATION_ERROR);
         }
@@ -283,8 +285,7 @@ export const confirmPasswordReset = async (req, res) => {
 
         await pool.query(
             `UPDATE users
-            SET password = $1,
-                status = 'active'
+            SET password = $1
             WHERE email = $2`,
             [hashpassword, email]
         );
