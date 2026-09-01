@@ -15,6 +15,12 @@ export class ChildSubcategory {
     }
 
     static async update(childsubcategoryId, value) {
+        // Guard: valid ID
+        const id = Number(childsubcategoryId);
+        if (!Number.isInteger(id) || id <= 0) {
+            throw new Error('A valid ID is required');
+        }
+
         const allowed = ['name', 'subcategory_id', 'description', 'image', 'status'];
         const fields = [];
         const values = [];
@@ -27,24 +33,31 @@ export class ChildSubcategory {
         }
 
         if (fields.length === 0) {
-            throw new Error('No fields to update');
+            throw new Error('No valid fields provided to update');
         }
 
-        // categoryId and vendorId appended after dynamic fields
         const idIdx = fields.length + 1;
 
-        const { rows } = await pool.query(`
-            UPDATE child_subcategories
-            SET ${fields.join(', ')}, updated_at = NOW()
-            WHERE id = $${idIdx}
-            RETURNING *`,
-            [...values, childsubcategoryId]
-        );
+        try {
+            const { rows } = await pool.query(
+                `
+                UPDATE child_subcategories
+                SET ${fields.join(', ')}, updated_at = NOW()
+                WHERE id = $${idIdx}
+                RETURNING *
+                `,
+                [...values, id]
+            );
 
-        return rows[0] ?? null; // null = not found or already deleted
+            // No row matched -> either it doesn't exist or was soft-deleted
+            return rows[0] || null;
+        } catch (error) {
+            console.error(`Error updating child_subcategory`, error);
+            throw error;
+        }
     }
 
-    static async fetch({ limit = 20, offset = 0 } = {}) {
+    static async fetch({ limit = 10, offset = 0 } = {}) {
         const result = await pool.query(`
             SELECT * FROM child_subcategories
             ORDER BY created_at DESC

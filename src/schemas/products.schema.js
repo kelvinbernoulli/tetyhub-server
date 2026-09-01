@@ -23,6 +23,7 @@ export const createProductSchema = Joi.object({
     // Categorization
     category_id: Joi.number().integer().positive().required().label("Category ID"),
     subcategory_id: Joi.number().integer().positive().optional().label("Subcategory ID"),
+    child_subcategory_id: Joi.number().integer().positive().optional().label("Child subcategory ID"),
     brand: Joi.string().trim().max(255).optional().label("Brand"),
     tags: Joi.array().items(Joi.string().trim().max(50)).max(20).optional().label("Tags"),
 
@@ -132,6 +133,13 @@ export const updateProductSchema = Joi.object({
         .allow(null)
         .optional()
         .label("Subcategory ID"),
+
+    child_subcategory_id: Joi.number()
+        .integer()
+        .positive()
+        .allow(null)
+        .optional()
+        .label("Child subcategory ID"),
 
     brand: Joi.string()
         .trim()

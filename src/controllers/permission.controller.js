@@ -12,56 +12,36 @@ export const assignAdminPermissions = async (req, res) => {
         const { body, session } = req;
         const user = session?.user;
 
-        const { error } = adminPermissionsSchema.validate(body);
+        const { error, value } = adminPermissionsSchema.validate(body, { abortEarly: false, stripUnknown: true });
         if (error) {
-            return respondWithError(res, 400, error.details[0].message, ERROR_CODES.BAD_REQUEST);
+            return respondWithError(res, 400, error.details.map(e => e.message).join(', '), ERROR_CODES.BAD_REQUEST);
         }
 
         if (!user) {
             return respondWithError(res, 401, "Unauthorized", ERROR_CODES.UNAUTHORIZED);
         }
-        const { admin_id, permissions, admin_roles } = body;
-
-        let vendorId = null;
-        if (user.role === ROLES.VENDOR) {
-            vendorId = user.id;
-        } else if (user.role === ROLES.VENDOR_ADMIN) {
-            vendorId = user.vendor_id;
-        }
+        const { admin_id, permissions, admin_roles } = value;
 
         // Validate admin roles exist
-        const validRoles = await AdminType.getAdminTypesByIds(admin_roles, vendorId);
+        const validRoles = await AdminType.getAdminTypesByIds(admin_roles);
         console.log("Valid admin roles:", validRoles);
         if (validRoles.length !== admin_roles.length) {
             const invalidIds = admin_roles.filter(id =>
                 !validRoles.find(r => r.id === parseInt(id))
             );
-            return respondWithError(
-                res, 422,
-                `Invalid admin role IDs: ${invalidIds.join(', ')}`,
-                ERROR_CODES.VALIDATION_ERROR
-            );
+            return respondWithError(res, 422, `Invalid admin role IDs: ${invalidIds.join(', ')}`, ERROR_CODES.VALIDATION_ERROR);
         }
 
         // Check permission keys match admin_roles
         const permissionKeys = Object.keys(permissions).map(Number);
         const unmatchedKeys = permissionKeys.filter(key => !admin_roles.includes(key));
         if (unmatchedKeys.length > 0) {
-            return respondWithError(
-                res, 422,
-                `Permission keys don't match admin roles: ${unmatchedKeys.join(', ')}`,
-                ERROR_CODES.VALIDATION_ERROR
-            );
+            return respondWithError(res, 422, `Permission keys don't match admin roles: ${unmatchedKeys.join(', ')}`, ERROR_CODES.VALIDATION_ERROR);
         }
 
         // Verify admin exists and belongs to right scope
-        let adminData;
-        if (vendorId) {
-            adminData = await VendorModel.getVendorAdminById(admin_id, vendorId);
-        } else {
-            adminData = await UserModel.getAdminUserById(admin_id);
-        }
 
+        const adminData = await UserModel.getAdminUserById(admin_id);
         if (!adminData) {
             return respondWithError(res, 404, "Admin not found", ERROR_CODES.RESOURCE_NOT_FOUND);
         }
@@ -71,7 +51,7 @@ export const assignAdminPermissions = async (req, res) => {
             return respondWithError(res, 403, "Cannot assign permissions to a Super Admin", ERROR_CODES.FORBIDDEN);
         }
 
-        const result = await UserModel.assignAdminPermissions(admin_id, admin_roles, permissions, vendorId);
+        const result = await UserModel.assignAdminPermissions(admin_id, admin_roles, permissions);
         console.log("Permissions assignment result:", result);
         if (!result) {
             return respondWithError(res, 500, "Failed to assign permissions", ERROR_CODES.RESOURCE_UPDATE_FAILED);

@@ -61,7 +61,7 @@ export class Subcategory {
             LIMIT 1`,
             [subcategoryId]
         );
-        return rows[0] ?? null;
+        return rows;
     }
 
     static async delete(subcategoryId) {

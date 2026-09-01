@@ -26,7 +26,7 @@ export const update_by_id = async (tb_name, row_id, data) => {
 
         const setClause = keys.map((key, index) => `${key} = $${index + 1}`).join(', ');
 
-        const queryText = `UPDATE ${tb_name} SET ${setClause} WHERE id = $${keys.length + 1} RETURNING *`;
+        const queryText = `UPDATE ${tb_name} SET ${setClause}, updated_at = NOW() WHERE id = $${keys.length + 1} RETURNING *`;
 
         values.push(row_id);
 
@@ -343,7 +343,7 @@ export const duplicate_check_by_columns = async (tableName, columns, values) => 
     const conditions = columns.map((col, i) => `${col} = $${i + 1}`);
 
     const { rows } = await pool.query(
-        `SELECT id FROM ${tableName}
+        `SELECT * FROM ${tableName}
         WHERE ${conditions.join(' OR ')}
         LIMIT 1`,
         values

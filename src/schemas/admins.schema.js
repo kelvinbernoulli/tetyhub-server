@@ -15,14 +15,13 @@ export const createAdminSchema = Joi.object({
             "string.pattern.base":
                 "Phone must be a valid international number format.",
         }),
-    country_id: Joi.number().integer().positive().required().label("Country ID"),
-    vendor_id: Joi.number().integer().positive().optional().label("Vendor ID"),
+    country_id: Joi.number().integer().positive().optional().label("Country ID")
 });
 
 export const updateAdminSchema = Joi.object({
     firstname: Joi.string().trim().min(2).max(100).optional().label("First Name"),
     lastname: Joi.string().trim().min(2).max(100).optional().label("Last Name"),
-    email: Joi.string().email().lowercase().optional().label("Email"),
+    // email: Joi.string().email().lowercase().optional().label("Email"),
     phone: Joi.string()
         .trim()
         .pattern(phoneRegex)

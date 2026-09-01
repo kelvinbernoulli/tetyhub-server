@@ -41,6 +41,16 @@ export class UserModel {
         }
     };
 
+    static async getAdminById(id) {
+        const queryResult = await select_column_by_key("admins", "*", "id", id);
+        const admin = queryResult.rows[0] ? queryResult.rows[0] : null;
+        if (admin) {
+            return admin;
+        } else {
+            return null;
+        }
+    };
+
     static async phoneExists(phone) {
         try {
             const queryResult = await select_column_by_key(TABLE_NAME, "*", "phone", phone);
@@ -175,7 +185,7 @@ export class UserModel {
         const query = `
             UPDATE users
             SET ${setClauses.join(', ')}
-            WHERE id = $${i} AND vendor_id IS NULL AND deleted_at IS NULL
+            WHERE id = $${i}
             RETURNING *
         `;
         const result = await pool.query(query, values);
@@ -183,7 +193,7 @@ export class UserModel {
 
     }
 
-    static async fetchAdminPermissions(adminId, vendorId = null) {
+    static async fetchAdminPermissions(adminId) {
         try {
             const query = `
             SELECT 

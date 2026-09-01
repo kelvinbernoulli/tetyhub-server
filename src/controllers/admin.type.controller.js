@@ -12,21 +12,30 @@ export const createAdminTypes = async (req, res) => {
         const { body, session } = req;
 
         const user = session?.user;
+        if (!user) {
+            return respondWithError(res, 401, 'Unauthorized: Login to continue', ERROR_CODES.UNAUTHORIZED);
+        }
+
         const { error, value } = createAdminTypeSchema.validate(body, { abortEarly: false, stripUnknown: true });
         if (error) {
             return respondWithError(res, 400, error.details.map((d) => d.message), ERROR_CODES.VALIDATION_ERROR);
         }
 
         const checkDuplicate = await queryModel.duplicate_check_by_columns("admin_types", ["admin_type"], [value.admin_type]);
-        if (checkDuplicate.rowCount > 0) {
+        if (checkDuplicate.length > 0) {
             return respondWithError(res, 400, 'Admin type already exists', ERROR_CODES.DUPLICATE_RESOURCE);
         }
+
+        value.slug = value.admin_type.toLowerCase().replace(/\s+/g, '-');
+
+        const keys = Object.keys(value);
+        const values = Object.values(value);
 
         const result = await insert("admin_types", keys, values);
         if (result.rowCount === 0) {
             return respondWithError(res, 500, 'Failed to add admin type', ERROR_CODES.INTERNAL_SERVER_ERROR);
         }
-        return respondWithSuccess(res, 201, 'Admin type created successfully', result.rows);
+        return respondWithSuccess(res, 200, 'Admin type created successfully', result.rows);
     } catch (error) {
         console.error("Error creating admin type:", error);
         return respondWithError(res, 500, 'Internal Server Error', ERROR_CODES.RESOURCE_CREATE_FAILED);
@@ -89,12 +98,12 @@ export const fetchAdminTypes = async (req, res) => {
             to_date: query.to_date
         };
 
-        const result = await AdminType.fetchAdminTypes(filters, offset, limit);
-        if (result.rows.length === 0) {
+        const result = await AdminType.fetchAdminTypes({ offset, limit });
+        if (result.rowCount === 0) {
             return respondWithSuccess(res, 404, 'No admin types found', ERROR_CODES.RESOURCE_NOT_FOUND);
         }
 
-        return respondWithSuccess(res, 200, 'Admin types fetched successfully', result);
+        return respondWithSuccess(res, 200, 'Admin types fetched successfully', result.rows);
 
     } catch (error) {
         console.error("Error fetching admin types:", error);

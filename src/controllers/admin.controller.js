@@ -31,12 +31,12 @@ export const createAdmin = async (req, res) => {
             return respondWithError(res, 400, "Invalid email format", ERROR_CODES.INVALID_FORMAT);
         }
 
-        duplicateUser = await UserModel.getUserByEmail(email);
+        const duplicateUser = await UserModel.getUserByEmail(email);
         if (duplicateUser) {
             return respondWithError(res, 409, "Email already exists", ERROR_CODES.DUPLICATE_RESOURCE);
         }
 
-        duplicatePhone = await UserModel.getUserByPhone(phone);
+        const duplicatePhone = await UserModel.getUserByPhone(phone);
         if (duplicatePhone) {
             return respondWithError(res, 409, "Phone number already exists", ERROR_CODES.DUPLICATE_RESOURCE);
         }
@@ -54,7 +54,7 @@ export const createAdmin = async (req, res) => {
 
         await Auth.activateAccount(newAdmin.id);
 
-        return respondWithSuccess(res, 201, "Admin added successfully", newAdmin);
+        return respondWithSuccess(res, 200, "Admin added successfully", newAdmin);
     } catch (error) {
         console.error("Error creating admin:", error);
         return respondWithError(res, 500, error.message || 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);
@@ -64,57 +64,31 @@ export const createAdmin = async (req, res) => {
 export const updateAdmin = async (req, res) => {
     try {
         const { body, params, session } = req;
-        const user = session?.user;
         const { id } = params;
 
-        const { error } = updateAdminSchema.validate(body);
+        const user = session?.user;
+        if (!user) {
+            return respondWithError(res, 401, 'Unauthorized', ERROR_CODES.UNAUTHORIZED);
+        }
+
+        const { error, value } = updateAdminSchema.validate(body, { abortEarly: false, stripUnknown: true });
         if (error) {
-            return respondWithError(res, 400, error.details[0].message, ERROR_CODES.VALIDATION_ERROR);
+            return respondWithError(res, 400, error.details.map((d) => d.message).join(", "), ERROR_CODES.VALIDATION_ERROR);
         }
 
-        let vendorId = null;
-        if (user.role === ROLES.VENDOR) {
-            vendorId = user.id;
-        } else if (user.role === ROLES.VENDOR_ADMIN) {
-            vendorId = user.vendor_id;
+        const { phone } = value;
+
+        const adminData = await UserModel.getAdminById(id);
+        console.log("Admin data:", adminData);
+        if (!adminData) {
+            return respondWithError(res, 404, "Admin not found", ERROR_CODES.RESOURCE_NOT_FOUND);
         }
 
-        let phone = null;
-        if (body.phone) {
-            phone = normalizePhone(body.phone);
-            body.phone = phone;
-        }
-
-        let adminData;
-
-        if (vendorId) {
-            adminData = await VendorModel.getVendorAdminById(id, vendorId);
-
-            if (!adminData) {
-                return respondWithError(res, 404, "Admin not found", ERROR_CODES.RESOURCE_NOT_FOUND);
-            }
-
-            if (phone && phone !== adminData.phone) {
-                const duplicatePhone = await VendorModel.getVendorAdminByPhone(phone, vendorId);
-
-                if (duplicatePhone) {
-                    return respondWithError(res, 409, "Phone number already exists", ERROR_CODES.RESOURCE_CONFLICT);
-                }
-            }
-
-        } else {
-            adminData = await UserModel.getAdminUserById(id);
-
-            if (!adminData) {
-                return respondWithError(res, 404, "Admin not found", ERROR_CODES.RESOURCE_NOT_FOUND);
-            }
-
-            if (phone && phone !== adminData.phone) {
-                const duplicatePhone = await UserModel.getAdminUserByPhone(phone);
-
-                if (duplicatePhone) {
-                    return respondWithError(res, 409, "Phone number already exists", ERROR_CODES.RESOURCE_CONFLICT);
-                }
+        if (phone && phone !== adminData.phone) {
+            console.log("Checking for duplicate phone number:", phone);
+            const duplicatePhone = await UserModel.getUserByPhone(phone);
+            if (duplicatePhone) {
+                return respondWithError(res, 409, "Phone number already exists", ERROR_CODES.RESOURCE_CONFLICT);
             }
         }
 
