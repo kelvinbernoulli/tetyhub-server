@@ -51,8 +51,7 @@ export const sendAdminRegistrationEmail = async (user, data) => {
     };
 
     try {
-        let info = await transporter.sendMail(mailOptions);
-        console.log("info", info)
+        await transporter.sendMail(mailOptions);
         return true;
     } catch (error) {
         console.error('Error sending admin reg email:', error);

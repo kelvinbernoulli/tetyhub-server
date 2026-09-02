@@ -2,6 +2,7 @@ import Crypto from 'crypto';
 import pkg from 'hi-base32';
 import bcrypt from "bcrypt";
 import { validationResult } from 'express-validator';
+import { ROLES as ROLE_CONSTANTS } from './access-control.js';
 const { encode } = pkg;
 import { config } from "dotenv";
 config();
@@ -164,22 +165,9 @@ export const buildRedisKey = (email, type) => {
     return parts.join(':');
 };
 
-export const ROLES = {
-    VENDOR: parseInt(process.env.VENDOR_ROLE_ID),
-    CUSTOMER: parseInt(process.env.CUSTOMER_ROLE_ID),
-    VENDOR_ADMIN: parseInt(process.env.VENDOR_ADMIN_ROLE_ID),
-    ADMIN: parseInt(process.env.ADMIN_ROLE_ID),
-    SUPER_ADMIN: parseInt(process.env.SUPER_ADMIN_ROLE_ID)
-};
-
-export const adminDefaultPassword = () => {
-    const characters = '0123456789';
-    let adminDefaultPassword = 'Admin@';
-    for (let i = 0; i < 6; i++) {
-        adminDefaultPassword += characters.charAt(Math.floor(Math.random() * characters.length));
-    }
-    return adminDefaultPassword;
-}
+// Roles are persisted as strings. Environment-specific numeric role IDs caused
+// valid users to fail every strict role comparison.
+export const ROLES = ROLE_CONSTANTS;
 
 export const generateOrderReference = (orderId) => {
     return `ORD-${orderId}-${Date.now()}`;

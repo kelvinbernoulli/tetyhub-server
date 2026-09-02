@@ -9,6 +9,7 @@ import redisClient from "#config/redis.js";
 import { decrypt } from "#utils/encryption.js";
 import pool from "#services/pg_pool.js";
 import passport from '#config/passport.js';
+import { generateCsrfToken } from '#utils/csrf.js';
 
 const SESSION_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
@@ -150,7 +151,12 @@ export const userSignin = async (req, res) => {
 
         delete user.password;
 
+        await new Promise((resolve, reject) => {
+            req.session.regenerate((err) => (err ? reject(err) : resolve()));
+        });
         req.session.user = { ...user };
+        req.session.authenticated_at = Date.now();
+        req.session.csrf_token = generateCsrfToken();
 
         await new Promise((resolve, reject) => {
             req.session.save((err) => (err ? reject(err) : resolve()));
@@ -162,7 +168,8 @@ export const userSignin = async (req, res) => {
         return respondWithSuccess(res, 200, 'Login successful', {
             ...user,
             sessionId: req.sessionID,
-            expiresAt: req.session.cookie.expires
+            expiresAt: req.session.cookie.expires,
+            csrfToken: req.session.csrf_token
         });
     } catch (error) {
         console.error(error);
@@ -196,7 +203,14 @@ export const googleAuthCallback = (req, res, next) => {
 
             delete user.password;
 
+            await new Promise((resolve, reject) => {
+                req.session.regenerate((sessionError) => (
+                    sessionError ? reject(sessionError) : resolve()
+                ));
+            });
             req.session.user = { ...user };
+            req.session.authenticated_at = Date.now();
+            req.session.csrf_token = generateCsrfToken();
 
             await new Promise((resolve, reject) => {
                 req.session.save((err) => (err ? reject(err) : resolve()));
@@ -256,7 +270,8 @@ export const confirmPasswordReset = async (req, res) => {
         const { body, query } = req;
         const { new_password } = body;
         const { email, token } = query;
-
+console.log('body:', body);
+console.log('query:', query);
         const decryptedToken = decrypt(token);
 
         const redisKey = buildRedisKey(email, 'password_reset');
@@ -317,7 +332,8 @@ export const refreshSession = async (req, res) => {
         await redisClient.expire(`user_sessions:${req.session.user.id}`, SESSION_MAX_AGE / 1000);
 
         return respondWithSuccess(res, 200, 'Session refreshed', {
-            expiresAt: req.session.cookie.expires
+            expiresAt: req.session.cookie.expires,
+            csrfToken: req.session.csrf_token
         });
     } catch (error) {
         console.error(error);
@@ -392,7 +408,11 @@ export const getAllSessions = async (req, res) => {
                     if (!parsed?.user) return null;
                     return {
                         sessionId: keys[index].replace('sess:', ''),
-                        user: parsed.user,
+                        user: {
+                            id: parsed.user.id,
+                            email: parsed.user.email,
+                            role: parsed.user.role,
+                        },
                         expiresAt: parsed?.cookie?.expires || null
                     };
                 } catch {
@@ -411,10 +431,23 @@ export const getAllSessions = async (req, res) => {
 export const revokeSession = async (req, res) => {
     try {
         const { sessionId } = req.params;
+        const rawSession = await redisClient.get(`sess:${sessionId}`);
 
         const deleted = await redisClient.del(`sess:${sessionId}`);
         if (!deleted) {
-            return respondWithError(res, 404, 'Session not found', ERROR_CODES.NOT_FOUND);
+            return respondWithError(res, 404, 'Session not found', ERROR_CODES.RESOURCE_NOT_FOUND);
+        }
+
+        if (rawSession) {
+            try {
+                const ownerId = JSON.parse(rawSession)?.user?.id;
+                if (ownerId) {
+                    await redisClient.sRem(`user_sessions:${ownerId}`, sessionId);
+                }
+            } catch {
+                // The primary session was revoked; a stale index is harmless and
+                // will be removed by the user's next session listing.
+            }
         }
 
         return respondWithSuccess(res, 200, 'Session terminated successfully');
@@ -422,4 +455,52 @@ export const revokeSession = async (req, res) => {
         console.error(error);
         return respondWithError(res, 500, 'Internal server error', ERROR_CODES.INTERNAL_SERVER_ERROR);
     }
+};
+
+export const revokeUserSession = async (req, res) => {
+    try {
+        const { sessionId } = req.params;
+        const userId = req.auth.userId;
+        const ownsSession = await redisClient.sIsMember(
+            `user_sessions:${userId}`,
+            sessionId
+        );
+
+        if (!ownsSession) {
+            return respondWithError(
+                res,
+                404,
+                'Session not found.',
+                ERROR_CODES.RESOURCE_NOT_FOUND
+            );
+        }
+
+        await redisClient.multi()
+            .del(`sess:${sessionId}`)
+            .sRem(`user_sessions:${userId}`, sessionId)
+            .exec();
+
+        return respondWithSuccess(res, 200, 'Session terminated successfully.');
+    } catch (error) {
+        console.error('Unable to revoke user session:', error);
+        return respondWithError(
+            res,
+            500,
+            'Internal server error',
+            ERROR_CODES.INTERNAL_SERVER_ERROR
+        );
+    }
+};
+
+export const getCsrfToken = async (req, res) => {
+    if (!req.session.csrf_token) {
+        req.session.csrf_token = generateCsrfToken();
+        await new Promise((resolve, reject) => {
+            req.session.save((error) => (error ? reject(error) : resolve()));
+        });
+    }
+
+    return respondWithSuccess(res, 200, 'CSRF token retrieved.', {
+        csrfToken: req.session.csrf_token,
+    });
 };

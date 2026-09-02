@@ -58,7 +58,7 @@ passport.use(
                             true,
                             password,
                             "customer",
-                            true,
+                            'active',
                             new Date().toISOString()
                         ]
                     );

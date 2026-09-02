@@ -6,6 +6,9 @@
     "main": "index.js",
     "type": "module",
     "scripts": {
+        "test": "node --test",
+        "test:admin": "node --test test/admin-authorization.test.js",
+        "bootstrap:super-admin": "node scripts/bootstrap-super-admin.js",
         "dev": "cross-env NODE_ENV=development nodemon ./index.js",
         "demo": "cross-env NODE_ENV=demo nodemon ./index.js",
         "start": "cross-env NODE_ENV=production node ./index.js",

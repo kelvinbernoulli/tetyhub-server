@@ -1,55 +1,61 @@
-import Joi from "joi";
+import Joi from 'joi';
+import { ADMIN_STATUSES } from '#utils/access-control.js';
 
-const phoneRegex = /^(\+234|0)[789][01]\d{8}$/;
+const e164Phone = /^\+[1-9]\d{7,14}$/;
+const strongPassword = Joi.string()
+    .min(12)
+    .max(128)
+    .pattern(/[a-z]/, 'lowercase character')
+    .pattern(/[A-Z]/, 'uppercase character')
+    .pattern(/[0-9]/, 'number')
+    .pattern(/[^A-Za-z0-9]/, 'special character');
 
 export const createAdminSchema = Joi.object({
-    firstname: Joi.string().trim().min(2).max(100).required().label("First name"),
-    lastname: Joi.string().trim().min(2).max(100).required().label("Last name"),
-    email: Joi.string().email().lowercase().required().label("Email"),
+    firstname: Joi.string().trim().min(2).max(100).required().label('First name'),
+    lastname: Joi.string().trim().min(2).max(100).required().label('Last name'),
+    email: Joi.string().trim().email().lowercase().max(320).required().label('Email'),
     phone: Joi.string()
         .trim()
-        .pattern(phoneRegex)
-        .required()
-        .label("Phone")
+        .pattern(e164Phone)
+        .optional()
+        .label('Phone')
         .messages({
-            "string.pattern.base":
-                "Phone must be a valid international number format.",
+            'string.pattern.base': 'Phone must use E.164 format, for example +2348012345678.',
         }),
-    country_id: Joi.number().integer().positive().optional().label("Country ID")
-});
+    country_id: Joi.number().integer().positive().optional().label('Country ID'),
+}).unknown(false);
 
 export const updateAdminSchema = Joi.object({
-    firstname: Joi.string().trim().min(2).max(100).optional().label("First Name"),
-    lastname: Joi.string().trim().min(2).max(100).optional().label("Last Name"),
-    // email: Joi.string().email().lowercase().optional().label("Email"),
+    firstname: Joi.string().trim().min(2).max(100).optional().label('First name'),
+    lastname: Joi.string().trim().min(2).max(100).optional().label('Last name'),
     phone: Joi.string()
         .trim()
-        .pattern(phoneRegex)
+        .pattern(e164Phone)
+        .allow(null)
         .optional()
-        .label("Phone")
+        .label('Phone')
         .messages({
-            "string.pattern.base": "Phone must be a valid international number format.",
-        })
-}).min(1);
-
-const adminPermissionsSchema = Joi.object({
-    sub_role: Joi.array().items(Joi.number().integer().min(1)).optional(),
-    status: Joi.boolean().valid(true, false).optional(),
-    permission: Joi.object()
-        .pattern(
-            Joi.string().regex(/^\d+$/),
-            Joi.object({
-                create: Joi.boolean(),
-                read: Joi.boolean(),
-                update: Joi.boolean(),
-                delete: Joi.boolean()
-            }).min(1).required()
-        )
+            'string.pattern.base': 'Phone must use E.164 format, for example +2348012345678.',
+        }),
+    country_id: Joi.number().integer().positive().allow(null).optional().label('Country ID'),
+    status: Joi.string()
+        .valid(ADMIN_STATUSES.ACTIVE, ADMIN_STATUSES.SUSPENDED)
         .optional()
-}).min(1);
+        .label('Admin status'),
+}).min(1).unknown(false);
+
+export const acceptAdminInvitationSchema = Joi.object({
+    token: Joi.string().trim().min(32).max(512).required().label('Invitation token'),
+    password: strongPassword.required().label('Password'),
+    password_confirmation: Joi.string()
+        .valid(Joi.ref('password'))
+        .required()
+        .label('Password confirmation')
+        .messages({ 'any.only': 'Password confirmation must match password.' }),
+}).unknown(false);
 
 export default {
     createAdminSchema,
     updateAdminSchema,
-    adminPermissionsSchema
+    acceptAdminInvitationSchema,
 };

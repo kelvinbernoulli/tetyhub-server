@@ -12,83 +12,92 @@ import * as AdminTypesController from "#controllers/admin.type.controller.js";
 import * as CouponsController from "#controllers/coupon.controller.js";
 import pagination from "#middlewares/pagination.middleware.js";
 import { Router } from "express";
-import { authenticated, isVendor, isVendorAdmin, isVendorAndVendorAdmin } from "#middlewares/auth.middleware.js";
+import {
+    authenticated,
+    canCreate,
+    canDelete,
+    canRead,
+    canUpdate,
+    isVendorAndVendorAdmin,
+    requireCsrfProtection,
+    requireRecentAuthentication,
+} from "#middlewares/auth.middleware.js";
 const router = Router();
 
+// Resolve the vendor from the authenticated database principal for every route.
+router.use(authenticated, isVendorAndVendorAdmin, requireCsrfProtection);
 
 //settings
-router.get("/settings", pagination, authenticated, SettingsController.fetchSettings);
-router.patch("/settings/update", authenticated, SettingsController.upsertSettings);
+router.get("/settings", canRead('settings'), pagination, SettingsController.fetchSettings);
+router.patch("/settings/update", canUpdate('settings'), SettingsController.upsertSettings);
 
 //support tickets
-router.post("/support-tickets/create", authenticated, SupportTicketController.createSupportTicket);
-router.get("/support-tickets", pagination, authenticated, SupportTicketController.fetchSupportTickets);
-router.get("/support-tickets/:ticketId", authenticated, SupportTicketController.getSupportTicket);
-router.patch("/support-tickets/:ticketId/reply", authenticated, SupportTicketController.replyToSupportTicket);
+router.post("/support-tickets/create", canCreate('support'), SupportTicketController.createSupportTicket);
+router.get("/support-tickets", canRead('support'), pagination, SupportTicketController.fetchSupportTickets);
+router.get("/support-tickets/:ticketId", canRead('support'), SupportTicketController.getSupportTicket);
+router.patch("/support-tickets/:ticketId/reply", canUpdate('support'), SupportTicketController.replyToSupportTicket);
 
 //products
-router.post("/product/create", ProductController.createProduct);
-router.get("/products", authenticated, isVendorAndVendorAdmin, pagination, ProductController.fetchProducts);
-router.get("/product/:id", authenticated, isVendorAndVendorAdmin, ProductController.fetchProductById);
-router.patch("/product/update/:id", authenticated, isVendorAndVendorAdmin, ProductController.updateProduct);
+router.post("/product/create", canCreate('products'), ProductController.createProduct);
+router.get("/products", canRead('products'), pagination, ProductController.fetchProducts);
+router.get("/product/:id", canRead('products'), ProductController.fetchProductById);
+router.patch("/product/update/:id", canUpdate('products'), ProductController.updateProduct);
 
 //orders
-router.get("/orders", authenticated, pagination, isVendorAndVendorAdmin, VendorController.getVendorOrders);
-router.get("/orders/:orderId", authenticated, pagination, isVendorAndVendorAdmin, VendorController.getVendorOrderById);
-router.get("/customer-orders", authenticated, pagination, isVendorAndVendorAdmin, VendorController.getCustomerOrders);
-router.patch("/order/:orderId/update-status", authenticated, isVendorAndVendorAdmin, VendorController.updateOrderStatus);
-router.patch("/order/:orderId/cancel", authenticated, isVendorAndVendorAdmin, VendorController.cancelOrder);
-router.get("/order/history/:customerId", authenticated, pagination, isVendorAndVendorAdmin, VendorController.getOrderHistory);
+router.get("/orders", canRead('orders'), pagination, VendorController.getVendorOrders);
+router.get("/orders/:orderId", canRead('orders'), pagination, VendorController.getVendorOrderById);
+router.get("/customer-orders", canRead('orders'), pagination, VendorController.getCustomerOrders);
+router.patch("/order/:orderId/update-status", canUpdate('orders'), VendorController.updateOrderStatus);
+router.patch("/order/:orderId/cancel", canUpdate('orders'), VendorController.cancelOrder);
+router.get("/order/history/:customerId", canRead('orders'), pagination, VendorController.getOrderHistory);
 
 //shipments
-router.post("/orders/:orderId/shipments", authenticated, isVendorAndVendorAdmin, ShipmentController.createShipment);
-router.patch("/shipments/:shipmentId", authenticated, isVendorAndVendorAdmin, ShipmentController.updateShipment);
-router.get("/shipments/:shipmentId", authenticated, isVendorAndVendorAdmin, ShipmentController.getShipmentById);
-router.get("/shipments/:shipmentId/tracking", authenticated, isVendorAndVendorAdmin, ShipmentController.getTrackingHistory);
-router.post("/shipments/:shipmentId/tracking", authenticated, isVendorAndVendorAdmin, ShipmentController.addTrackingUpdate);
+router.post("/orders/:orderId/shipments", canCreate('shipments'), ShipmentController.createShipment);
+router.patch("/shipments/:shipmentId", canUpdate('shipments'), ShipmentController.updateShipment);
+router.get("/shipments/:shipmentId", canRead('shipments'), ShipmentController.getShipmentById);
+router.get("/shipments/:shipmentId/tracking", canRead('shipments'), ShipmentController.getTrackingHistory);
+router.post("/shipments/:shipmentId/tracking", canUpdate('shipments'), ShipmentController.addTrackingUpdate);
 
 //returns
-router.get("/returns", authenticated, pagination, isVendorAndVendorAdmin, ReturnController.getVendorReturns);
-router.get("/returns/:returnId", authenticated, isVendorAndVendorAdmin, ReturnController.getReturnById);
-router.patch("/returns/:returnId/status", authenticated, isVendorAndVendorAdmin, ReturnController.updateReturnStatus);
+router.get("/returns", canRead('returns'), pagination, ReturnController.getVendorReturns);
+router.get("/returns/:returnId", canRead('returns'), ReturnController.getReturnById);
+router.patch("/returns/:returnId/status", canUpdate('returns'), ReturnController.updateReturnStatus);
 
 //refunds
-router.post("/refunds", authenticated, isVendorAndVendorAdmin, PaymentController.refund);
+router.post("/refunds", canCreate('refunds'), PaymentController.refund);
 
 //payments
-router.get('/payment/verify/:reference', authenticated, PaymentController.verifyPayment);
+router.get('/payment/verify/:reference', canRead('payments'), PaymentController.verifyPayment);
 
 //transactions
-router.get('/transactions', pagination, authenticated, TransactionHistoryController.getVendorTransactions);
+router.get('/transactions', canRead('transactions'), pagination, TransactionHistoryController.getVendorTransactions);
 
 //dashboard
-router.get("/dashboard/overview", authenticated, VendorController.getDashboard);
-router.get("/dashboard/revenue-chart", authenticated, VendorController.getRevenueChart);
-router.get("/dashboard/low-stock", authenticated, VendorController.getLowStockProducts);
+router.get("/dashboard/overview", canRead('dashboard'), VendorController.getDashboard);
+router.get("/dashboard/revenue-chart", canRead('dashboard'), VendorController.getRevenueChart);
+router.get("/dashboard/low-stock", canRead('dashboard'), VendorController.getLowStockProducts);
 
 //admins
-router.post("/admins/create", authenticated, AdminsController.createAdmin);
-router.get("/admins", pagination, authenticated, AdminsController.fetchAdmins);
-router.get("/admins/:id", authenticated, AdminsController.fetchAdminById);
-router.patch("/admins/update/:id", authenticated, AdminsController.updateAdmin);
-router.delete("/admins/delete/:id", authenticated, AdminsController.deleteAdmin);
+router.post("/admins/create", canCreate('admins'), requireRecentAuthentication(), AdminsController.createAdmin);
+router.get("/admins", canRead('admins'), pagination, AdminsController.fetchAdmins);
+router.get("/admins/:adminId", canRead('admins'), AdminsController.fetchAdminById);
+router.patch("/admins/update/:adminId", canUpdate('admins'), requireRecentAuthentication(), AdminsController.updateAdmin);
+router.delete("/admins/delete/:adminId", canDelete('admins'), requireRecentAuthentication(), AdminsController.deleteAdmin);
+router.post("/admins/:adminId/invitation/resend", canCreate('admins'), requireRecentAuthentication(), AdminsController.resendAdminInvitation);
 
 //admin types
-router.post("/admin-types/create", isVendorAndVendorAdmin, AdminTypesController.createAdminTypes);
-router.get("/admin-types", pagination, isVendorAndVendorAdmin, authenticated, AdminTypesController.fetchAdminTypes);
-router.get("/admin-types/view/:id", isVendorAndVendorAdmin, authenticated, AdminTypesController.viewAdminType);
-router.patch("/admin-types/update/:id", isVendorAndVendorAdmin, AdminTypesController.updateAdminTypes);
-router.delete("/admin-types/delete/:id", isVendorAndVendorAdmin, AdminTypesController.deleteAdminType);
+router.get("/admin-types", canRead('admins'), pagination, AdminTypesController.fetchAdminTypes);
+router.get("/admin-types/view/:id", canRead('admins'), AdminTypesController.viewAdminType);
 
 //vendor admin permissions
-router.post("/admins/permissions/assign", isVendor, PermissionsController.assignAdminPermissions);
-router.get("/admins/permissions/:adminId", isVendor, PermissionsController.fetchAdminPermissions);
+router.put("/admins/:adminId/permissions", canUpdate('admins'), requireRecentAuthentication(), PermissionsController.replaceAdminPermissions);
+router.get("/admins/:adminId/permissions", canRead('admins'), PermissionsController.fetchAdminPermissions);
 
 //coupons
-router.post("/coupons/create", authenticated, CouponsController.createCoupon);
-router.get("/coupons", pagination, authenticated, CouponsController.fetchCoupons);
-router.get("/coupons/view/:couponId", authenticated, CouponsController.fetchCouponById);
-router.patch("/coupons/update/:couponId", authenticated, CouponsController.updateCoupon);
-router.delete("/coupons/delete/:couponId", authenticated, CouponsController.deleteCoupon);
+router.post("/coupons/create", canCreate('coupons'), CouponsController.createCoupon);
+router.get("/coupons", canRead('coupons'), pagination, CouponsController.fetchCoupons);
+router.get("/coupons/view/:couponId", canRead('coupons'), CouponsController.fetchCouponById);
+router.patch("/coupons/update/:couponId", canUpdate('coupons'), CouponsController.updateCoupon);
+router.delete("/coupons/delete/:couponId", canDelete('coupons'), CouponsController.deleteCoupon);
 
 export default router;

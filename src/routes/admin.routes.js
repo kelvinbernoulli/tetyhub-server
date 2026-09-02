@@ -12,78 +12,83 @@ import * as SubcategoriesController from '#controllers/subcategories.controller.
 import * as ChildsubcategoriesController from '#controllers/childsubcategories.controller.js'
 import pagination from "#middlewares/pagination.middleware.js";
 import { Router } from "express";
-import { authenticated, canCreate, canDelete, canRead, canUpdate, isAllAdmin, isSuperAdmin } from "#middlewares/auth.middleware.js";
+import { authenticated, canCreate, canDelete, canRead, canUpdate, isAllAdmin, isSuperAdmin, requireCsrfProtection, requireRecentAuthentication } from "#middlewares/auth.middleware.js";
 const router = Router();
 
+// The entire platform-admin surface is deny-by-default. Public storefront
+// reads live on web.routes.js.
+router.use(authenticated, isAllAdmin, requireCsrfProtection);
+
 //currencies
-router.post("/currencies/create", authenticated,  canCreate('currencies'), CurrenciesController.createCurrency);
-router.get("/currencies", pagination, CurrenciesController.fetchCurrencies);
-router.get("/currencies/view/:currencyId", CurrenciesController.fetchCurrencyById);
-router.patch("/currencies/update/:currencyId", authenticated, canUpdate('currencies'), CurrenciesController.updateCurrency);
-router.delete("/currencies/delete/:currencyId", authenticated, canDelete('currencies'), CurrenciesController.deleteCurrency);
+router.post("/currencies/create", canCreate('currencies'), CurrenciesController.createCurrency);
+router.get("/currencies", canRead('currencies'), pagination, CurrenciesController.fetchCurrencies);
+router.get("/currencies/view/:currencyId", canRead('currencies'), CurrenciesController.fetchCurrencyById);
+router.patch("/currencies/update/:currencyId", canUpdate('currencies'), CurrenciesController.updateCurrency);
+router.delete("/currencies/delete/:currencyId", canDelete('currencies'), CurrenciesController.deleteCurrency);
 
 //countries
-router.post("/countries/create", authenticated, canCreate('countries'), CountriesController.createCountry);
-router.get("/countries", pagination, CountriesController.fetchCountries);
-router.get("/countries/view/:countryId", CountriesController.fetchCountryById);
-router.patch("/countries/update/:countryId", authenticated, canUpdate('countries'), CountriesController.updateCountry);
-router.delete("/countries/delete/:countryId", authenticated, canDelete('countries'), CountriesController.deleteCountry);
+router.post("/countries/create", canCreate('countries'), CountriesController.createCountry);
+router.get("/countries", canRead('countries'), pagination, CountriesController.fetchCountries);
+router.get("/countries/view/:countryId", canRead('countries'), CountriesController.fetchCountryById);
+router.patch("/countries/update/:countryId", canUpdate('countries'), CountriesController.updateCountry);
+router.delete("/countries/delete/:countryId", canDelete('countries'), CountriesController.deleteCountry);
 
 //categories
-router.post("/category/create", authenticated, CategoriesController.createCategory);
-router.get("/categories", authenticated, pagination, CategoriesController.fetchCategories);
-router.get("/category/view/:categoryId", authenticated, CategoriesController.fetchCategoryById);
-router.patch("/category/update/:categoryId", authenticated, CategoriesController.updateCategory);
-router.delete("/category/delete/:categoryId", authenticated, CategoriesController.deleteCategory);
+router.post("/category/create", canCreate('categories'), CategoriesController.createCategory);
+router.get("/categories", canRead('categories'), pagination, CategoriesController.fetchCategories);
+router.get("/category/view/:categoryId", canRead('categories'), CategoriesController.fetchCategoryById);
+router.patch("/category/update/:categoryId", canUpdate('categories'), CategoriesController.updateCategory);
+router.delete("/category/delete/:categoryId", canDelete('categories'), CategoriesController.deleteCategory);
 
 //subcategories
-router.post("/subcategory/create", authenticated, SubcategoriesController.createSubcategory);
-router.get("/subcategories", authenticated, pagination, SubcategoriesController.fetchSubcategories);
-router.get("/subcategory/view/:subcategoryId", authenticated, SubcategoriesController.fetchSubcategoryById);
-router.patch("/subcategory/update/:subcategoryId", authenticated, SubcategoriesController.updateSubcategory);
-router.delete("/subcategory/delete/:subcategoryId", authenticated, SubcategoriesController.deleteSubcategory);
+router.post("/subcategory/create", canCreate('categories'), SubcategoriesController.createSubcategory);
+router.get("/subcategories", canRead('categories'), pagination, SubcategoriesController.fetchSubcategories);
+router.get("/subcategory/view/:subcategoryId", canRead('categories'), SubcategoriesController.fetchSubcategoryById);
+router.patch("/subcategory/update/:subcategoryId", canUpdate('categories'), SubcategoriesController.updateSubcategory);
+router.delete("/subcategory/delete/:subcategoryId", canDelete('categories'), SubcategoriesController.deleteSubcategory);
 
 //child-subcategories
-router.post("/child-subcategory/create", authenticated, ChildsubcategoriesController.createChildsubcategory);
-router.get("/child-subcategories", authenticated, pagination, ChildsubcategoriesController.fetchChildsubcategories);
-router.get("/child-subcategory/view/:childSubcategoryId", authenticated, ChildsubcategoriesController.fetchChildsubcategoryById);
-router.patch("/child-subcategory/update/:childSubcategoryId", authenticated, ChildsubcategoriesController.updateChildsubcategory);
-router.delete("/child-subcategory/delete/:childSubcategoryId", authenticated, ChildsubcategoriesController.deleteChildsubcategory);
+router.post("/child-subcategory/create", canCreate('categories'), ChildsubcategoriesController.createChildsubcategory);
+router.get("/child-subcategories", canRead('categories'), pagination, ChildsubcategoriesController.fetchChildsubcategories);
+router.get("/child-subcategory/view/:childSubcategoryId", canRead('categories'), ChildsubcategoriesController.fetchChildsubcategoryById);
+router.patch("/child-subcategory/update/:childSubcategoryId", canUpdate('categories'), ChildsubcategoriesController.updateChildsubcategory);
+router.delete("/child-subcategory/delete/:childSubcategoryId", canDelete('categories'), ChildsubcategoriesController.deleteChildsubcategory);
 
 //support tickets
-router.post("/support-tickets/create", authenticated, canCreate('support'), supportTicketsController.createSupportTicket);
-router.get("/support-tickets/:ticketId/reply", pagination, authenticated, canCreate('support'), supportTicketsController.replyToSupportTicket);
-router.get("/support-tickets", pagination, supportTicketsController.fetchSupportTickets);
-router.get("/support-tickets/view/:ticketId", supportTicketsController.getSupportTicket);
+router.post("/support-tickets/create", canCreate('support'), supportTicketsController.createSupportTicket);
+router.patch("/support-tickets/:ticketId/reply", canUpdate('support'), supportTicketsController.replyToSupportTicket);
+router.get("/support-tickets", canRead('support'), pagination, supportTicketsController.fetchSupportTickets);
+router.get("/support-tickets/view/:ticketId", canRead('support'), supportTicketsController.getSupportTicket);
 // router.delete("/support-tickets/:ticketId", authenticated, canDelete('support'), supportTicketsController.deleteGeneralSupportTicket);
 
 //settings
-router.get("/settings", pagination, settingsController.fetchGeneralSettings);
-router.patch("/settings/upsert", authenticated, canUpdate('settings'), settingsController.upsertGeneralSettings);
+router.get("/settings", canRead('settings'), pagination, settingsController.fetchGeneralSettings);
+router.patch("/settings/upsert", canUpdate('settings'), settingsController.upsertGeneralSettings);
 
 //admin types
-router.post("/admin-type/create", authenticated, AdminTypesController.createAdminTypes);
-router.get("/admin-types", pagination, authenticated, AdminTypesController.fetchAdminTypes);
-router.get("/admin-type/view/:id", authenticated, AdminTypesController.viewAdminType);
-router.patch("/admin-type/update/:id", authenticated, AdminTypesController.updateAdminTypes);
-router.delete("/admin-type/delete/:id", authenticated, AdminTypesController.deleteAdminType);
+router.post("/admin-type/create", isSuperAdmin, requireRecentAuthentication(), AdminTypesController.createAdminTypes);
+router.get("/admin-types", canRead('admins'), pagination, AdminTypesController.fetchAdminTypes);
+router.get("/admin-type/view/:id", canRead('admins'), AdminTypesController.viewAdminType);
+router.patch("/admin-type/update/:id", isSuperAdmin, requireRecentAuthentication(), AdminTypesController.updateAdminTypes);
+router.delete("/admin-type/delete/:id", isSuperAdmin, requireRecentAuthentication(), AdminTypesController.deleteAdminType);
 
 //admins
-router.post("/admin/create", authenticated, AdminsController.createAdmin);
-router.get("/admins", pagination, authenticated, AdminsController.fetchAdmins);
-router.get("/admin/view/:id", authenticated, AdminsController.fetchAdminById);
-router.patch("/admin/update/:id", authenticated, AdminsController.updateAdmin);
-router.delete("/admin/delete/:id",authenticated, AdminsController.deleteAdmin);
+router.post("/admin/create", isSuperAdmin, requireRecentAuthentication(), AdminsController.createAdmin);
+router.get("/admins", canRead('admins'), pagination, AdminsController.fetchAdmins);
+router.get("/admin/view/:adminId", canRead('admins'), AdminsController.fetchAdminById);
+router.patch("/admin/update/:adminId", canUpdate('admins'), requireRecentAuthentication(), AdminsController.updateAdmin);
+router.delete("/admin/delete/:adminId", canDelete('admins'), requireRecentAuthentication(), AdminsController.deleteAdmin);
+router.post("/admin/:adminId/invitation/resend", isSuperAdmin, requireRecentAuthentication(), AdminsController.resendAdminInvitation);
 
 // admin permissions
-router.post("/admins/permissions/assign", authenticated, PermissionsController.assignAdminPermissions);
-router.get("/admins/permissions/:adminId", authenticated, PermissionsController.fetchAdminPermissions);
+router.put("/admins/:adminId/permissions", canUpdate('admins'), requireRecentAuthentication(), PermissionsController.replaceAdminPermissions);
+router.get("/admins/:adminId/permissions", canRead('admins'), PermissionsController.fetchAdminPermissions);
 
 //transactions
-router.get("/transactions", pagination, isAllAdmin, authenticated, TransactionHistoryController.getAllTransactions);
+router.get("/transactions", canRead('transactions'), pagination, TransactionHistoryController.getAllTransactions);
 
 //returns
-router.get("/returns", pagination, canRead('returns'), authenticated, ReturnController.getAllReturns);
+router.get("/returns", canRead('returns'), pagination, ReturnController.getAllReturns);
 router.patch("/returns/:returnId", canUpdate('returns'), ReturnController.adminUpdateReturn);
 
 export default router;

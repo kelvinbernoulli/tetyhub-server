@@ -59,7 +59,7 @@ app.use(cors({
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "X-CSRF-Token", "Accept"],
     exposedHeaders: ["Content-Range", "X-Content-Range"],
     maxAge: 86400,
     preflightContinue: false,
@@ -74,6 +74,7 @@ app.use(bodyParser.json({ limit: REQUEST_SIZE_LIMIT }));
 app.use(bodyParser.urlencoded({ limit: REQUEST_SIZE_LIMIT, extended: true }));
 app.use(passport.initialize());
 
+app.use(express.json());
 // Static assets
 app.use("/assets", express.static(path.join(__dirname, "assets")));
 

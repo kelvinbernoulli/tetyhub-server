@@ -69,7 +69,7 @@ export class Auth {
         const redisKey = buildRedisKey(user.email, 'password_reset');
         await redisClient.set(redisKey, code.toString(), { EX: 600 }); // 10 minutes expiration
 console.log("frontend url:", frontendBase);
-
+        
         const link = new URL('/forgot-password', frontendBase);
         link.searchParams.set('token', encryptedCode);
         link.searchParams.set('email', user.email);
