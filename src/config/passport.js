@@ -7,6 +7,7 @@ import Query from "#models/query.model.js";
 import { config } from "dotenv";
 config();
 
+
 passport.use(
     new GoogleStrategy(
         {
@@ -15,6 +16,10 @@ passport.use(
             callbackURL: process.env.GOOGLE_CALLBACK_URL,
         },
         async (accessToken, refreshToken, profile, done) => {
+            
+            console.log("GOOGLE_CLIENT_ID:", process.env.GOOGLE_CLIENT_ID)
+            console.log("GOOGLE_CLIENT_SECRET:", process.env.GOOGLE_CLIENT_SECRET)
+            console.log("GOOGLE_CALLBACK_URL:", process.env.GOOGLE_CALLBACK_URL)
             try {
                 const email = profile.emails?.[0]?.value;
                 if (!email) {

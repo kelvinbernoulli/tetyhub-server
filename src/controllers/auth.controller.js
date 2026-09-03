@@ -210,10 +210,10 @@ export const googleAuthCallback = (req, res, next) => {
             });
             req.session.user = { ...user };
 
-            await new Promise((resolve, reject) => {
+            const result = await new Promise((resolve, reject) => {
                 req.session.save((err) => (err ? reject(err) : resolve()));
             });
-
+console.log("Session save result:", result);
             if (user.role === ROLES.CUSTOMER) {
                 return res.redirect(`${frontendBase}`);
             } else {
