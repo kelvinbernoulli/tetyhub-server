@@ -190,8 +190,6 @@ export const googleAuth = (req, res, next) => {
 };
 
 export const googleAuthCallback = (req, res, next) => {
-    console.log('Raw query:', req.query);
-    console.log('Raw code:', req.query.code);
     try {
         passport.authenticate("google", { session: false }, async (err, user, info) => {
             if (err) {
@@ -210,7 +208,6 @@ export const googleAuthCallback = (req, res, next) => {
                 req.session.save((err) => (err ? reject(err) : resolve()));
             });
 
-            console.log("Session save result:", result);
             if (user.role === ROLES.CUSTOMER) {
                 return res.redirect(`${frontendBase}`);
             } else {
