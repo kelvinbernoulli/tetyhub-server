@@ -60,6 +60,7 @@ export const createAdminTypes = async (req, res) => {
         const type = await AdminType.create(value);
         return respondWithSuccess(res, 201, 'Permission resource created.', type);
     } catch (error) {
+        console.error('Permission resource creation failed:', error);
         return handleError(res, error, 'creation');
     }
 };

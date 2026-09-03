@@ -1,8 +1,12 @@
 import Auth from "#models/auth.model.js";
 import UserModel from "#models/user.model.js";
-import { loginSchema, registerSchema } from "#schemas/auth.schema.js";
+import {
+    loginSchema,
+    reauthenticateSchema,
+    registerSchema,
+} from "#schemas/auth.schema.js";
 import ERROR_CODES from "#utils/error.codes.js";
-import { buildRedisKey, frontendBase, normalizePhone, passwordHash, ROLES, validatePassword, verifyPassword } from "#utils/helpers.js";
+import { buildRedisKey, frontendBase, generateCode, normalizePhone, passwordHash, ROLES, validatePassword, verifyPassword } from "#utils/helpers.js";
 import CustomerModel from "#models/customer.model.js";
 import { respondWithError, respondWithSuccess } from "#utils/response.js";
 import redisClient from "#config/redis.js";
@@ -10,8 +14,11 @@ import { decrypt } from "#utils/encryption.js";
 import pool from "#services/pg_pool.js";
 import passport from '#config/passport.js';
 import { generateCsrfToken } from '#utils/csrf.js';
-
-const SESSION_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
+import crypto from 'crypto';
+import {
+    establishAuthenticatedSession,
+    SESSION_MAX_AGE_MS,
+} from '#services/session.service.js';
 
 export const userSignup = async (req, res) => {
     try {
@@ -61,7 +68,7 @@ export const userSignup = async (req, res) => {
 
 export const verifyEmail = async (req, res) => {
     try {
-        const { token, userId, email, vendorId } = req.query;
+        const { token, email } = req.query;
 
         const decryptedToken = decrypt(token);
 
@@ -77,13 +84,16 @@ export const verifyEmail = async (req, res) => {
             return respondWithError(res, 400, 'Invalid verification link', ERROR_CODES.OTP_INVALID);
         }
 
+        const emailVerifyToken = crypto.randomBytes(20).toString("hex");
+
         await pool.query(
             `UPDATE users
             SET email_verified = true,
+                email_verification_token = $1,
                 email_verified_at = NOW(),
                 status = 'active'
-            WHERE email = $1`,
-            [email]
+            WHERE email = $2`,
+            [emailVerifyToken, email]
         );
 
         await redisClient.del(redisKey);
@@ -149,27 +159,16 @@ export const userSignin = async (req, res) => {
             return respondWithError(res, 401, 'Invalid password', ERROR_CODES.INVALID_CREDENTIALS);
         }
 
-        delete user.password;
-
-        await new Promise((resolve, reject) => {
-            req.session.regenerate((err) => (err ? reject(err) : resolve()));
-        });
-        req.session.user = { ...user };
-        req.session.authenticated_at = Date.now();
-        req.session.csrf_token = generateCsrfToken();
-
-        await new Promise((resolve, reject) => {
-            req.session.save((err) => (err ? reject(err) : resolve()));
-        });
-
-        await redisClient.sAdd(`user_sessions:${user.id}`, req.sessionID);
-        await redisClient.expire(`user_sessions:${user.id}`, SESSION_MAX_AGE / 1000);
+        const session = await establishAuthenticatedSession(req, user);
 
         return respondWithSuccess(res, 200, 'Login successful', {
-            ...user,
-            sessionId: req.sessionID,
-            expiresAt: req.session.cookie.expires,
-            csrfToken: req.session.csrf_token
+            ...session.user,
+            sessionId: session.sessionId,
+            expiresAt: session.expiresAt,
+            authenticatedAt: session.authenticatedAt,
+            recentAuthenticationExpiresAt:
+                session.recentAuthenticationExpiresAt,
+            csrfToken: session.csrfToken,
         });
     } catch (error) {
         console.error(error);
@@ -191,27 +190,26 @@ export const googleAuth = (req, res, next) => {
 
 export const googleAuthCallback = (req, res, next) => {
     try {
-        passport.authenticate("google", { session: false }, async (err, user, info) => {
-            if (err) {
-                console.error("Google authentication error:", err);
-                return res.redirect(`${frontendBase}/login?error=server_error`);
-            }
+        passport.authenticate("google", { session: false }, async (err, user) => {
+            try {
+                if (err) {
+                    console.error("Google authentication error:", err);
+                    return res.redirect(`${frontendBase}/login?error=server_error`);
+                }
 
-            if (!user) {
-                return res.redirect(`${frontendBase}/login?error=google_auth_failed`);
-            }
+                if (!user) {
+                    return res.redirect(`${frontendBase}/login?error=google_auth_failed`);
+                }
 
-            delete user.password;
-            req.session.user = { ...user };
+                await establishAuthenticatedSession(req, user);
 
-            await new Promise((resolve, reject) => {
-                req.session.save((err) => (err ? reject(err) : resolve()));
-            });
-
-            if (user.role === ROLES.CUSTOMER) {
-                return res.redirect(`${frontendBase}`);
-            } else {
+                if (user.role === ROLES.CUSTOMER) {
+                    return res.redirect(`${frontendBase}`);
+                }
                 return res.redirect(`${frontendBase}/dashboard`);
+            } catch (error) {
+                console.error('Unable to establish Google session:', error);
+                return res.redirect(`${frontendBase}/login?error=server_error`);
             }
         }
         )(req, res, next);
@@ -320,7 +318,10 @@ export const refreshSession = async (req, res) => {
         });
 
         // Keep the session index TTL in sync
-        await redisClient.expire(`user_sessions:${req.session.user.id}`, SESSION_MAX_AGE / 1000);
+        await redisClient.expire(
+            `user_sessions:${req.session.user.id}`,
+            SESSION_MAX_AGE_MS / 1000
+        );
 
         return respondWithSuccess(res, 200, 'Session refreshed', {
             expiresAt: req.session.cookie.expires,
@@ -329,6 +330,51 @@ export const refreshSession = async (req, res) => {
     } catch (error) {
         console.error(error);
         return respondWithError(res, 500, 'Internal server error', ERROR_CODES.INTERNAL_SERVER_ERROR);
+    }
+};
+
+export const reauthenticate = async (req, res) => {
+    try {
+        const { error, value } = reauthenticateSchema.validate(req.body, {
+            abortEarly: false,
+            stripUnknown: true,
+        });
+        if (error) {
+            return respondWithError(
+                res,
+                400,
+                error.details.map((detail) => detail.message).join(', '),
+                ERROR_CODES.VALIDATION_ERROR
+            );
+        }
+
+        const user = await UserModel.getUserById(req.auth.userId);
+        if (!user || !await verifyPassword(value.password, user.password)) {
+            return respondWithError(
+                res,
+                401,
+                'Invalid credentials.',
+                ERROR_CODES.INVALID_CREDENTIALS
+            );
+        }
+
+        const session = await establishAuthenticatedSession(req, user);
+        return respondWithSuccess(res, 200, 'Identity verified.', {
+            sessionId: session.sessionId,
+            expiresAt: session.expiresAt,
+            authenticatedAt: session.authenticatedAt,
+            recentAuthenticationExpiresAt:
+                session.recentAuthenticationExpiresAt,
+            csrfToken: session.csrfToken,
+        });
+    } catch (error) {
+        console.error('Unable to reauthenticate session:', error);
+        return respondWithError(
+            res,
+            500,
+            'Internal server error',
+            ERROR_CODES.INTERNAL_SERVER_ERROR
+        );
     }
 };
 

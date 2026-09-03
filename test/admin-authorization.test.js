@@ -15,6 +15,8 @@ import {
 } from '../src/utils/admin-invitation.js';
 import { createAdminSchema } from '../src/schemas/admins.schema.js';
 import { replaceAdminPermissionsSchema } from '../src/schemas/permissions.schema.js';
+import { reauthenticateSchema } from '../src/schemas/auth.schema.js';
+import ERROR_CODES from '../src/utils/error.codes.js';
 
 test('roles use the persisted string representation', () => {
     assert.deepEqual(ROLES, {
@@ -140,4 +142,18 @@ test('each permission grant uses exactly one resource identifier', () => {
         grants: [{ admin_type_id: 2, resource: 'orders', can_read: true }],
     });
     assert.ok(invalid.error);
+});
+
+test('step-up authentication accepts only a password and has a distinct error code', () => {
+    assert.equal(
+        reauthenticateSchema.validate({ password: 'current-password' }).error,
+        undefined
+    );
+    assert.ok(
+        reauthenticateSchema.validate({
+            email: 'admin@example.com',
+            password: 'current-password',
+        }).error
+    );
+    assert.equal(ERROR_CODES.RECENT_AUTHENTICATION_REQUIRED, 3006);
 });

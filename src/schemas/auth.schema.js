@@ -24,6 +24,10 @@ export const loginSchema = Joi.object({
     password: Joi.string().required().label("Password")
 });
 
+export const reauthenticateSchema = Joi.object({
+    password: Joi.string().max(1024).required().label('Password'),
+}).unknown(false);
+
 export const updateProfileSchema = Joi.object({
     firstname:      Joi.string().trim().min(2).max(100).optional().label("First Name"),
     lastname:       Joi.string().trim().min(2).max(100).optional().label("Last Name"),
@@ -53,6 +57,7 @@ export const updateAddressSchema = addAddressSchema.fork(
 export default {
     registerSchema,
     loginSchema,
+    reauthenticateSchema,
     updateProfileSchema,
     addAddressSchema,
     updateAddressSchema

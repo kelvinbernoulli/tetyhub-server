@@ -10,6 +10,7 @@ import {
 } from '#utils/access-control.js';
 import { respondWithError } from '#utils/response.js';
 import { csrfTokensMatch } from '#utils/csrf.js';
+import { RECENT_AUTHENTICATION_MAX_AGE_MS } from '#services/session.service.js';
 
 class AuthenticationError extends Error {
     constructor(message, status = 401, code = ERROR_CODES.UNAUTHORIZED) {
@@ -181,7 +182,9 @@ export const requireRoles = (...expectedRoles) => async (req, res, next) => {
     }
 };
 
-export const requireRecentAuthentication = (maxAgeMs = 15 * 60 * 1000) => (
+export const requireRecentAuthentication = (
+    maxAgeMs = RECENT_AUTHENTICATION_MAX_AGE_MS
+) => (
     async (req, res, next) => {
         try {
             await hydrateAuthContext(req);
@@ -193,8 +196,8 @@ export const requireRecentAuthentication = (maxAgeMs = 15 * 60 * 1000) => (
                 return respondWithError(
                     res,
                     403,
-                    'Please sign in again before performing this sensitive action.',
-                    ERROR_CODES.AUTHENTICATION_FAILED
+                    `Your session is active, but this action requires authentication within the last ${maxAgeMs / (60 * 1000)} minutes.`,
+                    ERROR_CODES.RECENT_AUTHENTICATION_REQUIRED
                 );
             }
             return next();

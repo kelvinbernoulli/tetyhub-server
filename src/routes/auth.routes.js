@@ -18,10 +18,31 @@ const invitationLimiter = rateLimit({
     },
 });
 
+const reauthenticationLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 5,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+    skipSuccessfulRequests: true,
+    message: {
+        success: false,
+        message: 'Too many verification attempts. Please try again later.',
+        result: null,
+        code: 3000,
+    },
+});
+
 router.post("/signup", AuthController.userSignup);
 router.get("/verify-email", AuthController.verifyEmail);
 router.post('/resend-verification', AuthController.resendVerification);
 router.post("/signin", AuthController.userSignin);
+router.post(
+    "/reauthenticate",
+    authenticated,
+    requireCsrfProtection,
+    reauthenticationLimiter,
+    AuthController.reauthenticate
+);
 router.post("/refresh-session", authenticated, AuthController.refreshSession);
 router.get("/csrf-token", authenticated, AuthController.getCsrfToken);
 router.get("/sessions", authenticated, isSuperAdmin, requireRecentAuthentication(), AuthController.getAllSessions);

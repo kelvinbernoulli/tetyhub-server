@@ -40,16 +40,16 @@ export const generateBase32Secret = () => {
     return base32;
 };
 
-//generate referral code
-export const generateReferralCode = () => {
+//generate code
+export const generateCode = () => {
     const characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    let referralCode = "iDEAL-";
+    let code = "";
     for (let i = 0; i < 9; i++) {
-        referralCode += characters.charAt(
+        code += characters.charAt(
             Math.floor(Math.random() * characters.length)
         );
     }
-    return referralCode;
+    return code;
 };
 
 // generate password reset token

@@ -23,11 +23,12 @@ passport.use(
                 }
 
                 let user = await User.getUserByEmail(email);
-
+                const emailVerifyToken = crypto.randomBytes(20).toString("hex");
                 // Link Google account if user exists
                 if (user && !user.google_id) {
                     await Query.update_by_id("users", user.id, {
                         google_id: profile.id,
+                        email_verification_token: emailVerifyToken,
                         email_verified: true,
                     });
 
