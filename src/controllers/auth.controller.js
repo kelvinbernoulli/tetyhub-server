@@ -190,8 +190,10 @@ export const googleAuth = (req, res, next) => {
 };
 
 export const googleAuthCallback = (req, res, next) => {
+    console.log('Raw query:', req.query);
+    console.log('Raw code:', req.query.code);
     try {
-        passport.authenticate("google", { session: true }, async (err, user, info) => {
+        passport.authenticate("google", { session: false }, async (err, user, info) => {
             if (err) {
                 console.error("Google authentication error:", err);
                 return res.redirect(`${frontendBase}/login?error=server_error`);
@@ -201,14 +203,14 @@ export const googleAuthCallback = (req, res, next) => {
                 return res.redirect(`${frontendBase}/login?error=google_auth_failed`);
             }
 
-            const result = await new Promise((resolve, reject) => {
+            delete user.password;
+            req.session.user = { ...user };
+
+            await new Promise((resolve, reject) => {
                 req.session.save((err) => (err ? reject(err) : resolve()));
             });
 
-            delete user.password;
-
-console.log("Session save result:", result);
-            req.session.user = { ...user };
+            console.log("Session save result:", result);
             if (user.role === ROLES.CUSTOMER) {
                 return res.redirect(`${frontendBase}`);
             } else {
@@ -263,7 +265,7 @@ export const confirmPasswordReset = async (req, res) => {
         const { body, query } = req;
         const { new_password } = body;
         const { email, token } = query;
-        
+
         const decryptedToken = decrypt(token);
 
         const redisKey = buildRedisKey(email, 'password_reset');
