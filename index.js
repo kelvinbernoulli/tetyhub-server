@@ -143,6 +143,6 @@ const server = app.listen(PORT, () => {
 });
 
 process.on("SIGTERM", () => shutdown("SIGTERM"));
-process.on("SIGINT",  () => shutdown("SIGINT"));
+process.on("SIGINT", () => shutdown("SIGINT"));
 
 export default app;

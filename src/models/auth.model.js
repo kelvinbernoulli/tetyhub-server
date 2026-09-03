@@ -10,7 +10,7 @@ config();
 export class Auth {
     static async activateAccount(id) {
         const { rows } = await pool.query(
-            `SELECT u.id, u.email, u.role, u.email_verified
+            `SELECT u.id, u.firstname, u.lastname, u.email, u.role, u.email_verified
             FROM users u
             WHERE u.id = $1
             LIMIT 1`,
@@ -36,12 +36,11 @@ export class Auth {
         const redisKey = buildRedisKey(user.email, 'email_verification');
         await redisClient.set(redisKey, code.toString(), { EX: 600 }); // 10 minutes expiration
 
-        const link = new URL('//verify-email', frontendBase);
+        const link = new URL('/verify-email', frontendBase);
         link.searchParams.set('token', encryptedCode);
         link.searchParams.set('email', user.email);
 
         await sendEmailVerificationLink(user, link.toString());
-        console.log("Verification link:", link.toString());
         return { success: true, message: 'Verification email sent' };
     }
 
@@ -63,12 +62,11 @@ export class Auth {
 
         const { code } = await generateOTP();
         const encryptedCode = encrypt(code.toString());
-        console.log("Generated OTP for password reset:", encryptedCode);
+        // console.log("Generated OTP for password reset:", encryptedCode);
 
         // Match buildRedisKey format
         const redisKey = buildRedisKey(user.email, 'password_reset');
         await redisClient.set(redisKey, code.toString(), { EX: 600 }); // 10 minutes expiration
-console.log("frontend url:", frontendBase);
         
         const link = new URL('/forgot-password', frontendBase);
         link.searchParams.set('token', encryptedCode);
