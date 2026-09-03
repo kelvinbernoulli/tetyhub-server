@@ -201,19 +201,14 @@ export const googleAuthCallback = (req, res, next) => {
                 return res.redirect(`${frontendBase}/login?error=google_auth_failed`);
             }
 
-            delete user.password;
-
-            await new Promise((resolve, reject) => {
-                req.session.regenerate((sessionError) => (
-                    sessionError ? reject(sessionError) : resolve()
-                ));
-            });
-            req.session.user = { ...user };
-
             const result = await new Promise((resolve, reject) => {
                 req.session.save((err) => (err ? reject(err) : resolve()));
             });
+
+            delete user.password;
+
 console.log("Session save result:", result);
+            req.session.user = { ...user };
             if (user.role === ROLES.CUSTOMER) {
                 return res.redirect(`${frontendBase}`);
             } else {
