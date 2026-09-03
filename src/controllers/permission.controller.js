@@ -40,10 +40,7 @@ const handleError = (res, error, operation) => {
 export const replaceAdminPermissions = async (req, res) => {
     try {
         const adminId = parseAdminId(req.params.adminId);
-        const { error, value } = replaceAdminPermissionsSchema.validate(req.body, {
-            abortEarly: false,
-            stripUnknown: true,
-        });
+        const { error, value } = replaceAdminPermissionsSchema.validate(req.body, {abortEarly: false, stripUnknown: true});
         if (error) {
             return respondWithError(
                 res,

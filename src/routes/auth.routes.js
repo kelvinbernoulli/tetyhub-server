@@ -36,13 +36,7 @@ router.post("/signup", AuthController.userSignup);
 router.get("/verify-email", AuthController.verifyEmail);
 router.post('/resend-verification', AuthController.resendVerification);
 router.post("/signin", AuthController.userSignin);
-router.post(
-    "/reauthenticate",
-    authenticated,
-    requireCsrfProtection,
-    reauthenticationLimiter,
-    AuthController.reauthenticate
-);
+router.post("/reauthenticate", authenticated, requireCsrfProtection, reauthenticationLimiter, AuthController.reauthenticate);
 router.post("/refresh-session", authenticated, AuthController.refreshSession);
 router.get("/csrf-token", authenticated, AuthController.getCsrfToken);
 router.get("/sessions", authenticated, isSuperAdmin, requireRecentAuthentication(), AuthController.getAllSessions);

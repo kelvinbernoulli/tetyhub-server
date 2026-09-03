@@ -87,17 +87,9 @@ const getCreationScope = (auth) => {
 
 export const createAdmin = async (req, res) => {
     try {
-        const { error, value } = createAdminSchema.validate(req.body, {
-            abortEarly: false,
-            stripUnknown: true,
-        });
+        const { error, value } = createAdminSchema.validate(req.body, {abortEarly: false, stripUnknown: true});
         if (error) {
-            return respondWithError(
-                res,
-                400,
-                error.details.map((detail) => detail.message).join(', '),
-                ERROR_CODES.VALIDATION_ERROR
-            );
+            return respondWithError(res, 400, error.details.map((detail) => detail.message).join(', '), ERROR_CODES.VALIDATION_ERROR);
         }
 
         const { scope, vendorId } = getCreationScope(req.auth);

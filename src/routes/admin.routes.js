@@ -81,8 +81,8 @@ router.delete("/admin/delete/:adminId", canDelete('admins'), requireRecentAuthen
 router.post("/admin/:adminId/invitation/resend", isSuperAdmin, requireRecentAuthentication(), AdminsController.resendAdminInvitation);
 
 // admin permissions
-router.put("/admins/:adminId/permissions", canUpdate('admins'), requireRecentAuthentication(), PermissionsController.replaceAdminPermissions);
-router.get("/admins/:adminId/permissions", canRead('admins'), PermissionsController.fetchAdminPermissions);
+router.put("/permissions/assign/:adminId", canUpdate('admins'), requireRecentAuthentication(), PermissionsController.replaceAdminPermissions);
+router.get("/permissions/:adminId", canRead('admins'), PermissionsController.fetchAdminPermissions);
 
 //transactions
 router.get("/transactions", canRead('transactions'), pagination, TransactionHistoryController.getAllTransactions);

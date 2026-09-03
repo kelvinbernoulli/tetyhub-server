@@ -410,6 +410,7 @@ export class AdminModel {
         const safeLimit = Math.min(Math.max(Number(limit) || 40, 1), 100);
         const safeOffset = Math.max(Number(offset) || 0, 0);
         const whereSql = where.join(' AND ');
+        const whereClause = whereSql ? `WHERE ${whereSql}` : '';
         const listValues = [...values, safeLimit, safeOffset];
 
         const [listResult, countResult] = await Promise.all([
@@ -453,7 +454,7 @@ export class AdminModel {
                 JOIN users u ON u.id = a.user_id
                 LEFT JOIN admin_permissions ap ON ap.admin_id = a.id
                 LEFT JOIN admin_types at ON at.id = ap.admin_type_id
-                WHERE ${whereSql}
+                ${whereClause}
                 GROUP BY a.id, u.id
                 ORDER BY a.created_at DESC
                 LIMIT $${values.length + 1}
@@ -464,7 +465,7 @@ export class AdminModel {
                 `SELECT COUNT(*)::integer AS total
                 FROM admins a
                 JOIN users u ON u.id = a.user_id
-                WHERE ${whereSql}`,
+                ${whereClause}`,
                 values
             ),
         ]);

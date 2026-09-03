@@ -3,7 +3,7 @@ import { ADMIN_STATUSES } from '#utils/access-control.js';
 
 const e164Phone = /^\+[1-9]\d{7,14}$/;
 const strongPassword = Joi.string()
-    .min(12)
+    .min(8)
     .max(128)
     .pattern(/[a-z]/, 'lowercase character')
     .pattern(/[A-Z]/, 'uppercase character')
