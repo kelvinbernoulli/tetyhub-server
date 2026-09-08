@@ -10,6 +10,7 @@ import * as AdminsController from "#controllers/admin.controller.js";
 import * as TransactionHistoryController from "#controllers/transaction.history.controller.js";
 import * as AdminTypesController from "#controllers/admin.type.controller.js";
 import * as CouponsController from "#controllers/coupon.controller.js";
+import * as ServicesController from "#controllers/services.controller.js";
 import pagination from "#middlewares/pagination.middleware.js";
 import { Router } from "express";
 import {
@@ -38,10 +39,19 @@ router.get("/support-tickets/:ticketId", canRead('support'), SupportTicketContro
 router.patch("/support-tickets/:ticketId/reply", canUpdate('support'), SupportTicketController.replyToSupportTicket);
 
 //products
+router.get("/products/search", canRead('products'), pagination, ProductController.searchVendorProducts);
+router.delete("/product/delete/:id", canDelete('products'), ProductController.deleteProduct);
 router.post("/product/create", canCreate('products'), ProductController.createProduct);
-router.get("/products", canRead('products'), pagination, ProductController.fetchProducts);
-router.get("/product/:id", canRead('products'), ProductController.fetchProductById);
+router.get("/products", canRead('products'), pagination, ProductController.fetchVendorProducts);
+router.get("/product/:id", canRead('products'), ProductController.fetchVendorProductById);
 router.patch("/product/update/:id", canUpdate('products'), ProductController.updateProduct);
+
+//services
+router.delete("/service/delete/:id", canDelete('services'), ServicesController.deleteService);
+router.post("/service/create", canCreate('services'), ServicesController.createService);
+router.get("/services", canRead('services'), pagination, ServicesController.fetchServices);
+router.get("/service/:id", canRead('services'), ServicesController.viewService);
+router.patch("/service/update/:id", canUpdate('services'), ServicesController.updateService);
 
 //orders
 router.get("/orders", canRead('orders'), pagination, VendorController.getVendorOrders);

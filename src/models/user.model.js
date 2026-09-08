@@ -80,15 +80,29 @@ export class UserModel {
             const requestBodyValues = requestEntries.map(([, value]) => value);
 
             const insertUserQuery = `
-                INSERT INTO users (${requestBodyKeys.join(', ')})
-                VALUES (${requestBodyValues.map((_, i) => `$${i + 1}`).join(', ')})
-                RETURNING *
-            `;
+            INSERT INTO users (${requestBodyKeys.join(', ')})
+            VALUES (${requestBodyValues.map((_, i) => `$${i + 1}`).join(', ')})
+            RETURNING *
+        `;
 
             const userResult = await client.query(insertUserQuery, requestBodyValues);
             if (userResult.rowCount === 0) throw new Error('Error while creating user.');
 
             const user = userResult.rows[0];
+            
+            if (data.role === ROLES.VENDOR) {
+                const insertVendorQuery = `
+                INSERT INTO vendors (user_id)
+                VALUES ($1)
+                RETURNING *
+            `;
+
+                const vendorResult = await client.query(insertVendorQuery, [user.id]);
+                if (vendorResult.rowCount === 0) throw new Error('Error while creating vendor profile.');
+
+                user.vendor = vendorResult.rows[0];
+            }
+
             await client.query('COMMIT');
 
             const { password, ...safeUser } = user;
@@ -102,7 +116,7 @@ export class UserModel {
         }
     }
 
-    static async getCurrencyById (currencyId) {
+    static async getCurrencyById(currencyId) {
         const query = `
             SELECT *
             FROM currencies
@@ -111,7 +125,7 @@ export class UserModel {
         const { rows } = await pool.query(query, [countryId]);
         return rows[0] ?? null;
     }
-    
+
 }
 
 export default UserModel;

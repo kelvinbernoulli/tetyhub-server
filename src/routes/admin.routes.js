@@ -9,7 +9,7 @@ import * as TransactionHistoryController from "#controllers/transaction.history.
 import * as ReturnController from "#controllers/return.controller.js";
 import * as CategoriesController from '#controllers/categories.controller.js'
 import * as SubcategoriesController from '#controllers/subcategories.controller.js'
-import * as ChildsubcategoriesController from '#controllers/childsubcategories.controller.js'
+import * as ChildcategoriesController from '#controllers/childcategories.controller.js'
 import pagination from "#middlewares/pagination.middleware.js";
 import { Router } from "express";
 import { authenticated, canCreate, canDelete, canRead, canUpdate, isAllAdmin, isSuperAdmin, requireCsrfProtection, requireRecentAuthentication } from "#middlewares/auth.middleware.js";
@@ -20,10 +20,10 @@ const router = Router();
 router.use(authenticated, isAllAdmin, requireCsrfProtection);
 
 //currencies
-router.post("/currencies/create", canCreate('currencies'), CurrenciesController.createCurrency);
+router.post("/currency/create", canCreate('currencies'), CurrenciesController.createCurrency);
 router.get("/currencies", canRead('currencies'), pagination, CurrenciesController.fetchCurrencies);
-router.get("/currencies/view/:currencyId", canRead('currencies'), CurrenciesController.fetchCurrencyById);
-router.patch("/currencies/update/:currencyId", canUpdate('currencies'), CurrenciesController.updateCurrency);
+router.get("/currency/view/:currencyId", canRead('currencies'), CurrenciesController.fetchCurrencyById);
+router.patch("/currency/update/:currencyId", canUpdate('currencies'), CurrenciesController.updateCurrency);
 router.delete("/currencies/delete/:currencyId", canDelete('currencies'), CurrenciesController.deleteCurrency);
 
 //countries
@@ -48,11 +48,11 @@ router.patch("/subcategory/update/:subcategoryId", canUpdate('categories'), Subc
 router.delete("/subcategory/delete/:subcategoryId", canDelete('categories'), SubcategoriesController.deleteSubcategory);
 
 //child-subcategories
-router.post("/child-subcategory/create", canCreate('categories'), ChildsubcategoriesController.createChildsubcategory);
-router.get("/child-subcategories", canRead('categories'), pagination, ChildsubcategoriesController.fetchChildsubcategories);
-router.get("/child-subcategory/view/:childSubcategoryId", canRead('categories'), ChildsubcategoriesController.fetchChildsubcategoryById);
-router.patch("/child-subcategory/update/:childSubcategoryId", canUpdate('categories'), ChildsubcategoriesController.updateChildsubcategory);
-router.delete("/child-subcategory/delete/:childSubcategoryId", canDelete('categories'), ChildsubcategoriesController.deleteChildsubcategory);
+router.post("/childcategory/create", canCreate('categories'), ChildcategoriesController.createChildcategory);
+router.get("/childcategories", canRead('categories'), pagination, ChildcategoriesController.fetchChildcategories);
+router.get("/childcategory/view/:ChildcategoryId", canRead('categories'), ChildcategoriesController.fetchChildcategoryById);
+router.patch("/childcategory/update/:ChildcategoryId", canUpdate('categories'), ChildcategoriesController.updateChildcategory);
+router.delete("/childcategory/delete/:ChildcategoryId", canDelete('categories'), ChildcategoriesController.deleteChildcategory);
 
 //support tickets
 router.post("/support-tickets/create", canCreate('support'), supportTicketsController.createSupportTicket);

@@ -17,7 +17,7 @@ export class Product {
                 weight, length, width, height, free_shipping,
                 attributes, options, variants,
                 status, is_featured, is_digital,
-                meta_title, meta_description, slug, currency
+                meta_title, meta_description, slug, currency_id
             } = data;
 
             // Generate slug
@@ -48,7 +48,7 @@ export class Product {
                 cost_price, discount, stock, low_stock_threshold,
                 track_inventory, has_variants, thumbnail, weight,
                 length, width, height, free_shipping, status,
-                is_featured, is_digital, meta_title, meta_description, currency
+                is_featured, is_digital, meta_title, meta_description, currency_id
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
                 $11, $12, $13, $14, $15, $16, $17, $18,
@@ -65,9 +65,9 @@ export class Product {
                     thumbnailUrl, weight ?? null,
                     length ?? null, width ?? null,
                     height ?? null, free_shipping ?? false,
-                    status ?? 'draft', is_featured ?? false,
+                    status ?? 'active', is_featured ?? false,
                     is_digital ?? false, meta_title ?? null,
-                    meta_description ?? null, currency
+                    meta_description ?? null, currency_id
                 ]
             );
 
@@ -154,12 +154,12 @@ export class Product {
 
                     const { rows: variantRows } = await client.query(
                         `INSERT INTO product_variants (
-                        product_id, sku, barcode, price, compare_at_price,
+                        product_id, vendor_id, sku, barcode, price, compare_at_price,
                         cost_price, stock, low_stock_threshold, weight, image
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
                     RETURNING id`,
                         [
-                            product.id, variant.sku ?? null,
+                            product.id, vendorId, variant.sku ?? null,
                             variant.barcode ?? null, variant.price,
                             variant.compare_at_price ?? null,
                             variant.cost_price ?? null, variant.stock,
@@ -224,7 +224,6 @@ export class Product {
             // Always scope to vendor
             whereClauses.push(`p.vendor_id = $${paramIndex++}`);
             values.push(vendorId);
-            whereClauses.push(`p.deleted_at IS NULL`);
 
             const query = `
                 SELECT

@@ -9,12 +9,12 @@ export const createCurrency = async (req, res) => {
 
         const { error } = createCurrencySchema.validate(body, { abortEarly: false });
         if (error) {
-            return respondWithError(res, 400, error.details[0].message, ERROR_CODES.VALIDATION_ERROR);
+            return respondWithError(res, 400, error.details.map((e)=>e.message).join(", "), ERROR_CODES.VALIDATION_ERROR);
         }
 
-        const { name, currency_code } = body;
+        const { name, code } = body;
 
-        const duplicates = await duplicate_check_by_columns('currencies', ['name', 'currency_code'], [name, currency_code]);
+        const duplicates = await duplicate_check_by_columns('currencies', ['name', 'code'], [name, code]);
         if (duplicates.length > 0) {
             return respondWithError(res, 409, 'Currency with the same name or code already exists', ERROR_CODES.DUPLICATE_RESOURCE);
         }
@@ -43,14 +43,14 @@ export const updateCurrency = async (req, res) => {
         if (error) {
             return respondWithError(res, 400, error.details[0].message, ERROR_CODES.VALIDATION_ERROR);
         }
-        const { name, currency_code, status } = body;
+        const { name, code, status } = body;
 
         const existingCurrency = await fetch_one_by_key('currencies', 'id', currencyId);
         if (existingCurrency.rowCount === 0) {
             return respondWithError(res, 404, 'Currency  not found', ERROR_CODES.RESOURCE_NOT_FOUND);
         }
 
-        const duplicates = await duplicate_check_by_columns('currencies', ['name', 'currency_code'], [name, currency_code]);
+        const duplicates = await duplicate_check_by_columns('currencies', ['name', 'code'], [name, code]);
         if (duplicates.length > 0) {
             return respondWithError(res, 409, 'Another currency with the same name or code already exists', ERROR_CODES.DUPLICATE_RESOURCE);
         }

@@ -10,10 +10,11 @@ import * as UsersController from "#controllers/users.controller.js";
 import * as CountriesController from "#controllers/countries.controller.js";
 import * as CategoriesController from "#controllers/categories.controller.js";
 import * as SubcategoriesController from "#controllers/subcategories.controller.js";
-import * as ChildSubcategoriesController from "#controllers/childsubcategories.controller.js";
+import * as ChildcategoriesController from "#controllers/childcategories.controller.js";
 import * as TransactionHistoryController from "#controllers/transaction.history.controller.js";
 import * as NotificationController from "#controllers/notification.controller.js";
 import * as CouponsController from "#controllers/coupon.controller.js";
+import * as CurrencyController from "#controllers/currency.controller.js";
 import pagination from "#middlewares/pagination.middleware.js";
 import { Router } from "express";
 import { authenticated, isCustomer } from "#middlewares/auth.middleware.js";
@@ -36,11 +37,14 @@ router.get("/categories", pagination, CategoriesController.fetchCategories);
 //subcategories
 router.get("/subcategories", pagination, SubcategoriesController.fetchSubcategories);
 
-//child-subcategories
-router.get("/child-subcategories", pagination, ChildSubcategoriesController.fetchChildsubcategories);
+//childcategories
+router.get("/childcategories", pagination, ChildcategoriesController.fetchChildcategories);
 
 //coupons
 router.get("/coupons", pagination, CouponsController.fetchCoupons);
+
+//currencies
+router.get("/currencies", pagination, CurrencyController.fetchCurrencies);
 
 //products
 router.get("/products", pagination, ProductController.fetchProducts);
