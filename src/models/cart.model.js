@@ -5,6 +5,7 @@ import Coupon from "./coupons.model.js";
 
 export class Cart {
     static async addToCart(userId, { product_id, variant_id = null, quantity }) {
+        console.log("data:", userId, product_id, variant_id, quantity)
 
         const client = await pool.connect();
 
@@ -73,10 +74,10 @@ export class Cart {
                     FROM cart_items ci
                     INNER JOIN carts c ON c.id = ci.cart_id
                     WHERE c.user_id = $1
-                    AND ci.product_id = $3
+                    AND ci.product_id = $2
                     AND (
-                        ($4::INT IS NULL AND ci.variant_id IS NULL)
-                        OR ci.variant_id = $4
+                        ($3::INT IS NULL AND ci.variant_id IS NULL)
+                        OR ci.variant_id = $3
                     )
                 `,
                 [userId, product_id, variant_id]
@@ -521,7 +522,7 @@ export class Cart {
             );
 
             if (!rows.length || !rows[0].items || rows[0].items.length === 0) {
-                return {error: 'Cart is empty', code: 400};
+                return { error: 'Cart is empty', code: 400 };
             }
 
             const cart = rows[0];
@@ -529,7 +530,7 @@ export class Cart {
 
             for (const item of items) {
                 if (!item.stock || item.stock < item.quantity) {
-                    return {error: `Insufficient stock for ${item.product_name}. ` + `Only ${item.stock || 0} available`, code: 422};
+                    return { error: `Insufficient stock for ${item.product_name}. ` + `Only ${item.stock || 0} available`, code: 422 };
                 }
             }
 

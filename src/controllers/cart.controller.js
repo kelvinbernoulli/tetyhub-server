@@ -9,9 +9,6 @@ export const addToCart = async (req, res) => {
         const { body, session } = req;
 
         const user = session?.user;
-        if (!user) {
-            return respondWithError(res, 401, "Unauthorized", ERROR_CODES.UNAUTHORIZED);
-        }
 
         const { error, value } = addToCartSchema.validate(body, { abortEarly: false, stripUnknown: true });
         if (error) {
