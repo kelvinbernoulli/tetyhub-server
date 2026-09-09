@@ -16,6 +16,7 @@ const validate = (schema, input) => {
         );
     return value;
 };
+
 const id = (value) => {
     if (
         !/^\d+$/.test(String(value)) ||
@@ -26,6 +27,7 @@ const id = (value) => {
         throw productError('Invalid product ID', 400);
     return Number(value);
 };
+
 const vendor = (req) => {
     // Populated by authenticated middleware; never derive vendor identity from user.id.
     const vendorId = req.auth?.vendorId;
@@ -33,6 +35,7 @@ const vendor = (req) => {
         throw productError('Vendor authentication required', 403);
     return vendorId;
 };
+
 const endpoint =
     (action, message, status = 200) =>
     async (req, res) => {
@@ -92,6 +95,7 @@ export const createProduct = endpoint(
     'Product added successfully',
     201
 );
+
 export const updateProduct = endpoint(
     (req) =>
         Product.update(
@@ -101,6 +105,7 @@ export const updateProduct = endpoint(
         ),
     'Product updated successfully'
 );
+
 export const deleteProduct = endpoint(
     (req) => Product.delete(id(req.params.id), vendor(req)),
     'Product deleted successfully'
@@ -111,30 +116,37 @@ export const fetchProducts = endpoint(
     (req) => Product.list(filters(req)),
     'Products fetched successfully'
 );
+
 export const fetchVendorProducts = endpoint(
     (req) => Product.list(filters(req, true), vendor(req)),
     'Products fetched successfully'
 );
+
 export const fetchProductById = endpoint(
     (req) => Product.findPublicById(id(req.params.productId ?? req.params.id)),
     'Product fetched successfully'
 );
+
 export const fetchVendorProductById = endpoint(
     (req) => Product.findById(id(req.params.id), vendor(req)),
     'Product fetched successfully'
 );
+
 export const searchProducts = endpoint(
     (req) => Product.search(null, filters(req, false, 40)),
     'Products fetched successfully'
 );
+
 export const searchVendorProducts = endpoint(
     (req) => Product.search(vendor(req), filters(req, true, 40)),
     'Products fetched successfully'
 );
+
 export const getFilters = endpoint(
     (req) => Product.getFilters(filters(req).vendor_id ?? null),
     'Filters fetched successfully'
 );
+
 export const getRelatedProducts = endpoint(
     (req) =>
         Product.getRelatedProducts(
@@ -143,6 +155,7 @@ export const getRelatedProducts = endpoint(
         ),
     'Related products fetched successfully'
 );
+
 export const getFeaturedProducts = endpoint((req) => {
     const value = filters(req, false, 10);
     return Product.getFeaturedProducts(value.limit, value.vendor_id ?? null);
