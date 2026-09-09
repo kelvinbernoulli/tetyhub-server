@@ -21,7 +21,13 @@ export class Childcategory {
             throw new Error('A valid ID is required');
         }
 
-        const allowed = ['name', 'subcategory_id', 'description', 'image', 'status'];
+        let slug;
+        if (value.name) {
+            slug = value.name.toLowerCase().replace(/\s+/g, '-');
+        }
+        value.slug = slug;
+
+        const allowed = ['name', 'subcategory_id', 'description', 'image', 'status', 'slug'];
         const fields = [];
         const values = [];
 

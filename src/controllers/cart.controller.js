@@ -58,10 +58,6 @@ export const upsertCart = async (req, res) => {
         const { body, session } = req;
         const user = session?.user;
 
-        if (!user) {
-            return respondWithError(res, 401, 'Unauthorized', ERROR_CODES.UNAUTHORIZED);
-        }
-
         const { error, value } = upsertCartSchema.validate(body, { abortEarly: false, stripUnknown: true });
         if (error) {
             return respondWithError(res, 400, error.details[0].message, ERROR_CODES.VALIDATION_ERROR);
@@ -112,10 +108,6 @@ export const previewCheckout = async (req, res) => {
         const { session, query } = req;
         const user = session?.user;
 
-        if (!user) {
-            return respondWithError(res, 401, 'Unauthorized', ERROR_CODES.UNAUTHORIZED);
-        }
-
         const { coupon_code } = query;
 
         const result = await Cart.previewCheckout(user.id, coupon_code);
@@ -123,7 +115,7 @@ export const previewCheckout = async (req, res) => {
             return respondWithError(res, result.code, result.error, ERROR_CODES.VALIDATION_ERROR);
         }
 
-        return respondWithSuccess(res, 200, 'Checkout preview fetched successfully', result);
+        return respondWithSuccess(res, 200, 'Checkout preview', result);
     } catch (error) {
         console.error("Error previewing checkout:", error);
         return respondWithError(res, 500, 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);
@@ -134,10 +126,6 @@ export const validateCoupon = async (req, res) => {
     try {
         const { session, params, body } = req;
         const user = session?.user;
-
-        if (!user) {
-            return respondWithError(res, 401, 'Unauthorized', ERROR_CODES.UNAUTHORIZED);
-        }
 
         const { coupon_code, subtotal } = body;
 

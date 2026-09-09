@@ -1,4 +1,4 @@
-// import Product, { productError } from '#models/products.model.js';
+import Product, { productError } from '#models/products.model.js';
 import {
     createProductSchema,
     updateProductSchema,

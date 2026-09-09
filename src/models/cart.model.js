@@ -344,7 +344,7 @@ export class Cart {
                 FROM carts c
                 LEFT JOIN cart_items ci ON ci.cart_id = c.id
                 LEFT JOIN products p ON p.id = ci.product_id
-                WHERE c.user_id = $1 AND c.vendor_id = $2
+                WHERE c.user_id = $1
                 GROUP BY c.id`,
                 [userId]
             );

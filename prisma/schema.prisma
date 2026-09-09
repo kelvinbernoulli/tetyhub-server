@@ -478,7 +478,7 @@ model cart_items {
   variant_id  Int?
   quantity    Int
   price       Decimal   @db.Decimal(10, 2)
-  currency_id Int
+  currency_id Int?
   created_at  DateTime  @default(now())
   updated_at  DateTime? @updatedAt
 
@@ -486,7 +486,7 @@ model cart_items {
   cart     carts             @relation(fields: [cart_id], references: [id], onDelete: Cascade)
   product  products          @relation(fields: [product_id], references: [id])
   variant  product_variants? @relation(fields: [variant_id], references: [id])
-  currency currencies        @relation(fields: [currency_id], references: [id])
+  currency currencies?        @relation(fields: [currency_id], references: [id])
 
   @@index([variant_id])
 }
