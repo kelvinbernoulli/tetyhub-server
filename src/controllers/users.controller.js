@@ -51,24 +51,36 @@ export const addAddress = async (req, res) => {
         const { session, body } = req;
         const user = session?.user;
 
-        if (!user) {
-            return respondWithError(res, 401, 'Unauthorized', ERROR_CODES.UNAUTHORIZED);
-        }
-
-
         const { error, value } = addAddressSchema.validate(body, { abortEarly: false, stripUnknown: true });
         if (error) {
-            return respondWithError(res, 400, error.details[0].message, ERROR_CODES.VALIDATION_ERROR);
+            return respondWithError(res, 400, error.details.map((detail) => detail.message).join(", "), ERROR_CODES.VALIDATION_ERROR);
         }
 
-        const result = await CustomerModel.addAddress(user.id, user.vendor_id, value);
+        const result = await CustomerModel.addAddress(user.id, value);
         if (result?.error) {
             return respondWithError(res, result.code, result.error, ERROR_CODES.RESOURCE_CREATE_FAILED);
         }
-        return respondWithSuccess(res, 201, 'Address added successfully', result);
+        return respondWithSuccess(res, 200, 'Address added successfully', result);
     } catch (error) {
         console.error("Error adding address:", error);
         return respondWithError(res, 500, error.message || 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);
+    }
+};
+
+export const fetchAddresses = async (req, res) => {
+    try {
+        const { session, body } = req;
+        const user = session?.user;
+
+        const result = await CustomerModel.getAddresses(user.id);
+        if (result?.error) {
+            return respondWithError(res, result.code, result.error, ERROR_CODES.RESOURCE_CREATE_FAILED);
+        }
+        
+        return respondWithSuccess(res, 200, 'Addresss retrieved successfully', result);
+    } catch (error) {
+        console.error("Error fetching addresses:", error);
+        return respondWithError(res, 500,'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);
     }
 };
 
@@ -77,18 +89,14 @@ export const updateAddress = async (req, res) => {
         const { session, body, params } = req;
         const user = session?.user;
 
-        if (!user) {
-            return respondWithError(res, 401, 'Unauthorized', ERROR_CODES.UNAUTHORIZED);
-        }
-
         const { addressId } = params;
 
         const { error, value } = updateAddressSchema.validate(body, { abortEarly: false, stripUnknown: true });
         if (error) {
-            return respondWithError(res, 400, error.details[0].message, ERROR_CODES.VALIDATION_ERROR);
+            return respondWithError(res, 400, error.details.map((detail) => detail.message).join(", "), ERROR_CODES.VALIDATION_ERROR);
         }
 
-        const result = await CustomerModel.updateAddress(user.id, user.vendor_id, addressId, value);
+        const result = await CustomerModel.updateAddress(user.id, addressId, value);
         if (result?.error) {
             return respondWithError(res, result.code, result.error, ERROR_CODES.RESOURCE_UPDATE_FAILED);
         }
@@ -105,13 +113,9 @@ export const deleteAddress = async (req, res) => {
         const { session, params } = req;
         const user = session?.user;
 
-        if (!user) {
-            return respondWithError(res, 401, 'Unauthorized', ERROR_CODES.UNAUTHORIZED);
-        }
-
         const { addressId } = params;
 
-        const result = await CustomerModel.deleteAddress(user.id, user.vendor_id, addressId);
+        const result = await CustomerModel.deleteAddress(user.id, addressId);
         if (result?.error) {
             return respondWithError(res, result.code, result.error, ERROR_CODES.RESOURCE_NOT_FOUND);
         }
@@ -128,13 +132,9 @@ export const setDefaultAddress = async (req, res) => {
         const { session, params } = req;
         const user = session?.user;
 
-        if (!user) {
-            return respondWithError(res, 401, 'Unauthorized', ERROR_CODES.UNAUTHORIZED);
-        }
-
         const { addressId } = params;
 
-        const result = await CustomerModel.setDefaultAddress(user.id, user.vendor_id, addressId);
+        const result = await CustomerModel.setDefaultAddress(user.id, addressId);
         if (result?.error) {
             return respondWithError(res, result.code, result.error, ERROR_CODES.RESOURCE_NOT_FOUND);
         }

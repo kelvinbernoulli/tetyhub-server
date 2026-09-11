@@ -642,11 +642,11 @@ export class Product {
         if (vendorId !== null) requireVendor(vendorId);
         const { rows } = await pool.query(
             `SELECT MIN(p.price) AS min_price,MAX(p.price) AS max_price,
-   COALESCE(array_agg(DISTINCT p.brand) FILTER (WHERE p.brand IS NOT NULL),'{}'::text[]) AS brands,
-   COALESCE(array_agg(DISTINCT tag) FILTER (WHERE tag IS NOT NULL),'{}'::text[]) AS tags,
-   COALESCE(jsonb_agg(DISTINCT jsonb_build_object('id',c.id,'name',c.name)) FILTER (WHERE c.id IS NOT NULL),'[]'::jsonb) AS categories
-   FROM products p LEFT JOIN categories c ON c.id=p.category_id LEFT JOIN LATERAL unnest(p.tags) tag ON true
-   WHERE p.status='active' AND p.deleted_at IS NULL ` +
+            COALESCE(array_agg(DISTINCT p.brand) FILTER (WHERE p.brand IS NOT NULL),'{}'::text[]) AS brands,
+            COALESCE(array_agg(DISTINCT tag) FILTER (WHERE tag IS NOT NULL),'{}'::text[]) AS tags,
+            COALESCE(jsonb_agg(DISTINCT jsonb_build_object('id',c.id,'name',c.name)) FILTER (WHERE c.id IS NOT NULL),'[]'::jsonb) AS categories
+            FROM products p LEFT JOIN categories c ON c.id=p.category_id LEFT JOIN LATERAL unnest(p.tags) tag ON true
+            WHERE p.status='active' AND p.deleted_at IS NULL ` +
                 (vendorId !== null ? 'AND p.vendor_id = $1' : ''),
             vendorId !== null ? [vendorId] : []
         );

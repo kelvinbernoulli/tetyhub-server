@@ -134,7 +134,7 @@ class CustomerModel {
                         lastname    = COALESCE($2, lastname),
                         phone       = COALESCE($3, phone),
                         updated_at  = NOW()
-                    WHERE id = $4 AND deleted_at IS NULL`,
+                    WHERE id = $4`,
                     [firstname ?? null, lastname ?? null, phone ?? null, userId]
                 );
             }
@@ -163,28 +163,28 @@ class CustomerModel {
         }
     }
 
-    static async addAddress(userId, vendorId, data) {
+    static async addAddress(userId, data) {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
 
-            const { firstname, lastname, phone, address, city, state, country, zip_code, is_default } = data;
+            const { firstname, lastname, phone_one, phone_two, address, city, state, country_id, zip_code, is_default } = data;
 
             // If new address is default unset others
             if (is_default) {
                 await client.query(
-                    `UPDATE user_addresses SET is_default = false WHERE user_id = $1 AND vendor_id = $2`,
-                    [userId, vendorId]
+                    `UPDATE shipping_addresses SET is_default = false WHERE user_id = $1`,
+                    [userId]
                 );
             }
 
             // Check if this is first address — auto set as default
             const { rows: existing } = await client.query(
-                `SELECT id FROM user_addresses WHERE user_id = $1 AND vendor_id = $2`,
-                [userId, vendorId]
+                `SELECT id FROM shipping_addresses WHERE user_id = $1`,
+                [userId]
             );
 
-            // Max 2 addresses per user per vendor
+            // Max 2 addresses per user
             if (existing.length >= 2) {
                 return { error: 'Maximum of 2 addresses allowed', code: 422 };
             }
@@ -192,11 +192,11 @@ class CustomerModel {
             const setDefault = is_default || existing.length === 0;
 
             const { rows } = await client.query(
-                `INSERT INTO user_addresses
-                (user_id, vendor_id, firstname, lastname, phone, address, city, state, country, zip_code, is_default)
+                `INSERT INTO shipping_addresses
+                (user_id, firstname, lastname, phone_one, phone_two, address, city, state, country_id, zip_code, is_default)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
                 RETURNING *`,
-                [userId, vendorId, firstname, lastname, phone, address, city, state, country, zip_code ?? null, setDefault]
+                [userId, firstname, lastname, phone_one, phone_two, address, city, state, country_id, zip_code ?? null, setDefault]
             );
 
             await client.query('COMMIT');
@@ -210,15 +210,15 @@ class CustomerModel {
         }
     }
 
-    static async updateAddress(userId, vendorId, addressId, data) {
+    static async updateAddress(userId, addressId, data) {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
 
             // Verify address belongs to user
             const { rows: existing } = await client.query(
-                `SELECT id FROM user_addresses WHERE id = $1 AND user_id = $2 AND vendor_id = $3`,
-                [addressId, userId, vendorId]
+                `SELECT id FROM user_addresses WHERE id = $1 AND user_id = $2`,
+                [addressId, userId]
             );
 
             if (existing.length === 0) {
@@ -228,8 +228,8 @@ class CustomerModel {
             // If updating to default unset others
             if (data.is_default) {
                 await client.query(
-                    `UPDATE user_addresses SET is_default = false WHERE user_id = $1 AND vendor_id = $2`,
-                    [userId, vendorId]
+                    `UPDATE user_addresses SET is_default = false WHERE user_id = $1`,
+                    [userId]
                 );
             }
 
@@ -237,15 +237,16 @@ class CustomerModel {
                 `UPDATE user_addresses SET
                     firstname   = COALESCE($1, firstname),
                     lastname    = COALESCE($2, lastname),
-                    phone       = COALESCE($3, phone),
-                    address     = COALESCE($4, address),
-                    city        = COALESCE($5, city),
-                    state       = COALESCE($6, state),
-                    country     = COALESCE($7, country),
-                    zip_code    = COALESCE($8, zip_code),
+                    phone_one       = COALESCE($3, phone_one),
+                    phone_two       = COALESCE($4, phone_two),
+                    address     = COALESCE($5, address),
+                    city        = COALESCE($6, city),
+                    state       = COALESCE($7, state),
+                    country_id     = COALESCE($8, country_id),
+                    zip_code    = COALESCE($9, zip_code),
                     is_default  = COALESCE($9, is_default),
                     updated_at  = NOW()
-                WHERE id = $10 AND user_id = $11 AND vendor_id = $12
+                WHERE id = $10 AND user_id = $11
                 RETURNING *`,
                 [
                     data.firstname ?? null, data.lastname ?? null,
@@ -275,7 +276,7 @@ class CustomerModel {
 
             // Verify address belongs to user
             const { rows: existing } = await client.query(
-                `SELECT * FROM user_addresses WHERE id = $1 AND user_id = $2 AND vendor_id = $3`,
+                `SELECT * FROM shipping_addresses WHERE id = $1 AND user_id = $2`,
                 [addressId, userId, vendorId]
             );
 
@@ -286,18 +287,18 @@ class CustomerModel {
             const address = existing[0];
 
             await client.query(
-                `DELETE FROM user_addresses WHERE id = $1 AND user_id = $2 AND vendor_id = $3`,
+                `DELETE FROM shipping_addresses WHERE id = $1 AND user_id = $2`,
                 [addressId, userId, vendorId]
             );
 
             // If deleted address was default set another as default
             if (address.is_default) {
                 await client.query(
-                    `UPDATE user_addresses SET is_default = true
-                    WHERE user_id = $1 AND vendor_id = $2 AND id != $3
+                    `UPDATE shipping_addresses SET is_default = true
+                    WHERE user_id = $1 AND id != $2
                     ORDER BY created_at DESC
                     LIMIT 1`,
-                    [userId, vendorId, addressId]
+                    [userId, addressId]
                 );
             }
 
@@ -312,13 +313,13 @@ class CustomerModel {
         }
     }
 
-    static async getAddresses(userId, vendorId) {
+    static async getAddresses(userId) {
         try {
             const { rows } = await pool.query(
-                `SELECT * FROM user_addresses
-                WHERE user_id = $1 AND vendor_id = $2
+                `SELECT * FROM shipping_addresses
+                WHERE user_id = $1
                 ORDER BY is_default DESC, created_at DESC`,
-                [userId, vendorId]
+                [userId]
             );
             return rows;
         } catch (error) {
@@ -327,7 +328,7 @@ class CustomerModel {
         }
     }
 
-    static async setDefaultAddress(userId, vendorId, addressId) {
+    static async setDefaultAddress(userId, addressId) {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');

@@ -477,6 +477,7 @@ export class Cart {
                         json_agg(
                             jsonb_build_object(
                                 'id', ci.id,
+                                'vendor_id', p.vendor_id,
                                 'product_id', ci.product_id,
                                 'product_name', p.name,
                                 'thumbnail', p.thumbnail,
@@ -665,86 +666,94 @@ export class Cart {
         try {
             await client.query('BEGIN');
 
-            const { shipping_address_id, shipping_address, gateway, note, coupon_code } = data;
-
+            const {
+                firstname, lastname, phone_one, phone_two, email,
+                address, city, state, country, zip_code,
+                coupon_code, gateway, note
+            } = data;
 
             // 1. Preview checkout to get totals
             const preview = await Cart.previewCheckout(user.id, coupon_code);
             if (preview?.error) {
-                return preview;
+                await client.query('ROLLBACK'); // must rollback before returning — otherwise
+                return preview;                  // the connection goes back to the pool mid-transaction
             }
 
-            // 2. Resolve shipping address
-            let address;
-            if (shipping_address_id) {
-                const { rows: addressRows } = await client.query(
-                    `SELECT * FROM user_addresses WHERE id = $1 AND user_id = $2`,
-                    [shipping_address_id, user.id]
-                );
+            const order_number = `ORD${Date.now()}${Math.floor(Math.random() * 999999999999)}`;
 
-                if (addressRows.length === 0) {
-                    return { error: 'Shipping address not found', code: 404 };
-                }
-                address = addressRows[0];
-            } else {
-                address = shipping_address;
-            }
-
-            // 3. Create order
+            // 2. Create order
             const { rows: orderRows } = await client.query(
-                `INSERT INTO orders (user_id, subtotal, shipping_fee, discount, total, payment_method, note)
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                `INSERT INTO orders (user_id, subtotal, order_number, shipping_fee, discount, total, payment_method, note)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                 RETURNING *`,
                 [
-                    user.id, preview.subtotal, preview.shipping_fee,
+                    user.id, preview.subtotal, order_number, preview.shipping_fee,
                     preview.discount, preview.total, gateway, note ?? null
                 ]
             );
 
             const order = orderRows[0];
 
-            // 4. Insert order items and deduct stock
+            // 3. Insert order items and deduct stock (with a stock-sufficiency guard)
             for (const item of preview.items) {
+                console.log("item:", item)
                 await client.query(
-                    `INSERT INTO order_items (order_id, product_id, variant_id, quantity, price, subtotal)
-                    VALUES ($1, $2, $3, $4, $5, $6)`,
+                    `INSERT INTO order_items (order_id, vendor_id, product_id, variant_id, quantity, price, subtotal)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7)`,
                     [
-                        order.id, item.product_id,
+                        order.id, item.vendor_id, item.product_id,
                         item.variant_id ?? null,
                         item.quantity, item.price,
                         item.subtotal
                     ]
                 );
 
-                // Deduct stock
+                // Deduct stock ONLY if enough stock is actually available.
+                // WHERE stock >= $1 makes this check-and-decrement atomic — no separate
+                // SELECT-then-UPDATE race window, and rowCount tells us if it failed.
+                let stockResult;
                 if (item.variant_id) {
-                    await client.query(
-                        `UPDATE product_variants SET stock = stock - $1, updated_at = NOW() WHERE id = $2`,
+                    stockResult = await client.query(
+                        `UPDATE product_variants
+                        SET stock = stock - $1, updated_at = NOW()
+                        WHERE id = $2 AND stock >= $1
+                        RETURNING stock`,
                         [item.quantity, item.variant_id]
                     );
                 } else {
-                    await client.query(
-                        `UPDATE products SET stock = stock - $1, updated_at = NOW() WHERE id = $2`,
+                    stockResult = await client.query(
+                        `UPDATE products
+                        SET stock = stock - $1, updated_at = NOW()
+                        WHERE id = $2 AND stock >= $1
+                        RETURNING stock`,
                         [item.quantity, item.product_id]
                     );
                 }
+
+                if (stockResult.rowCount === 0) {
+                    await client.query('ROLLBACK');
+                    return {
+                        error: `Insufficient stock for "${item.name || 'an item'}" in your cart. Please update your cart and try again.`,
+                        code: 409
+                    };
+                }
             }
 
-            // 5. Insert shipping address
+            // 4. Insert shipping address (fixed: use the flat destructured fields, not `address.firstname`)
             await client.query(
-                `INSERT INTO order_addresses
-                (order_id, firstname, lastname, phone, address, city, state, country, zip_code)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+                `INSERT INTO shipping_addresses
+                (order_id, firstname, lastname, phone_one, phone_two, address, city, state, country, zip_code)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
                 [
                     order.id,
-                    address.firstname, address.lastname,
-                    address.phone, address.address,
-                    address.city, address.state,
-                    address.country, address.zip_code ?? null
+                    firstname, lastname,
+                    phone_one, phone_two, address,
+                    city, state,
+                    country, zip_code ?? null
                 ]
             );
 
-            // 6. Apply coupon
+            // 5. Apply coupon
             if (coupon_code && preview.coupon) {
                 await Coupon.incrementUsage(preview.coupon.id);
 
@@ -755,13 +764,10 @@ export class Cart {
                 );
             }
 
-            // 7. Clear cart
-            await client.query(
-                `DELETE FROM carts WHERE user_id = $1`,
-                [user.id]
-            );
+            // 6. Clear cart
+            await client.query(`DELETE FROM carts WHERE user_id = $1`, [user.id]);
 
-            // 8. Insert order status history
+            // 7. Insert order status history
             await client.query(
                 `INSERT INTO order_status_history (order_id, status, note, changed_by)
                 VALUES ($1, $2, $3, $4)`,
@@ -770,16 +776,23 @@ export class Cart {
 
             await client.query('COMMIT');
 
-            // 9. Initiate payment
+            // 8. Initiate payment — deliberately outside the DB transaction, since this
+            // is a network call and shouldn't hold DB locks open while waiting on it.
             const payment = await Payment.initiatePayment(user.id, order.id, gateway);
             if (payment?.error) {
-                return payment;
+                // Order already exists and was committed — surface the order_id so the
+                // client can show "your order was created, retry payment" instead of a
+                // plain failure that implies nothing happened.
+                return {
+                    error: payment.error,
+                    code: payment.code || 502,
+                    order_id: order.id
+                };
             }
 
             order.items = preview.items;
-            console.log('order items', order.items)
 
-            // 10. Send order confirmation email
+            // 9. Send order confirmation email
             await sendOrderConfirmationEmail(user, order);
 
             return {

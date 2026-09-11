@@ -87,6 +87,7 @@ model users {
   activity_logs             activity_logs[]
   support_tickets           support_tickets[]
   support_ticket_replies    support_ticket_replies[]
+  shipping_addresses        shipping_addresses[]
   admin                     admins?                  @relation("AdminUser")
   admin_assignments_created admins[]                 @relation("AdminCreatedBy")
   permission_grants_created admin_permissions[]      @relation("PermissionGrantedBy")
@@ -266,8 +267,7 @@ model categories {
   // Relations
   subcategories subcategories[]
   products      products[]
-  services services[]
-
+  services      services[]
 }
 
 model subcategories {
@@ -285,10 +285,9 @@ model subcategories {
   category      categories        @relation(fields: [category_id], references: [id], onDelete: Cascade)
   childcategory childcategories[]
   products      products[]
+  services      services[]
 
   @@unique([category_id, slug])
-  services services[]
-
 }
 
 model childcategories {
@@ -305,10 +304,9 @@ model childcategories {
   // Relations
   subcategory subcategories @relation(fields: [subcategory_id], references: [id], onDelete: Cascade)
   products    products[]
+  services    services[]
 
   @@unique([subcategory_id, slug])
-  services services[]
-
 }
 
 model products {
@@ -350,11 +348,11 @@ model products {
   deleted_at          DateTime?
 
   // Relations
-  vendor         vendors            @relation(fields: [vendor_id], references: [id], onDelete: Cascade)
-  category       categories         @relation(fields: [category_id], references: [id])
-  subcategory    subcategories?     @relation(fields: [subcategory_id], references: [id])
-  childcategory  childcategories?   @relation(fields: [childcategory_id], references: [id])
-  currency       currencies         @relation(fields: [currency_id], references: [id])
+  vendor         vendors              @relation(fields: [vendor_id], references: [id], onDelete: Cascade)
+  category       categories           @relation(fields: [category_id], references: [id])
+  subcategory    subcategories?       @relation(fields: [subcategory_id], references: [id])
+  childcategory  childcategories?     @relation(fields: [childcategory_id], references: [id])
+  currency       currencies           @relation(fields: [currency_id], references: [id])
   images         product_images[]
   variants       product_variants[]
   attributes     product_attributes[]
@@ -385,29 +383,29 @@ model product_images {
 }
 
 model product_variants {
-  id               Int       @id @default(autoincrement())
-  product_id       Int
-  vendor_id        Int
-  name             String?
-  sku              String?
-  barcode          String?
-  price            Decimal   @db.Decimal(10, 2)
-  compare_at_price Decimal?  @db.Decimal(10, 2)
-  cost_price       Decimal?  @db.Decimal(10, 2)
-  stock            Int       @default(0)
-  low_stock_threshold Int    @default(5) 
-  image            String?
-  weight           Float?
-  dimensions       String?
-  status           String    @default("active")
-  created_at       DateTime  @default(now())
-  updated_at       DateTime? @updatedAt
+  id                  Int       @id @default(autoincrement())
+  product_id          Int
+  vendor_id           Int
+  name                String?
+  sku                 String?
+  barcode             String?
+  price               Decimal   @db.Decimal(10, 2)
+  compare_at_price    Decimal?  @db.Decimal(10, 2)
+  cost_price          Decimal?  @db.Decimal(10, 2)
+  stock               Int       @default(0)
+  low_stock_threshold Int       @default(5)
+  image               String?
+  weight              Float?
+  dimensions          String?
+  status              String    @default("active")
+  created_at          DateTime  @default(now())
+  updated_at          DateTime? @updatedAt
 
   // Relations
-  product     products      @relation(fields: [product_id], references: [id], onDelete: Cascade)
-  vendor      vendors       @relation(fields: [vendor_id], references: [id], onDelete: Cascade)
-  cart_items  cart_items[]
-  order_items order_items[]
+  product       products                @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  vendor        vendors                 @relation(fields: [vendor_id], references: [id], onDelete: Cascade)
+  cart_items    cart_items[]
+  order_items   order_items[]
   option_values variant_option_values[]
 }
 
@@ -434,12 +432,12 @@ model product_options {
 }
 
 model product_option_values {
-  id         Int                     @id @default(autoincrement())
-  option_id  Int
-  value      String
-  position   Int                     @default(0)
-  option     product_options         @relation(fields: [option_id], references: [id], onDelete: Cascade)
-  variants   variant_option_values[]
+  id        Int                     @id @default(autoincrement())
+  option_id Int
+  value     String
+  position  Int                     @default(0)
+  option    product_options         @relation(fields: [option_id], references: [id], onDelete: Cascade)
+  variants  variant_option_values[]
 
   @@index([option_id])
 }
@@ -486,7 +484,7 @@ model cart_items {
   cart     carts             @relation(fields: [cart_id], references: [id], onDelete: Cascade)
   product  products          @relation(fields: [product_id], references: [id])
   variant  product_variants? @relation(fields: [variant_id], references: [id])
-  currency currencies?        @relation(fields: [currency_id], references: [id])
+  currency currencies?       @relation(fields: [currency_id], references: [id])
 
   @@index([variant_id])
 }
@@ -530,12 +528,13 @@ model orders {
   updated_at       DateTime? @updatedAt
 
   // Relations
-  user      users         @relation(fields: [user_id], references: [id])
-  coupon    coupons?      @relation(fields: [coupon_id], references: [id])
-  items     order_items[]
-  payments  payments[]
-  shipments shipments[]
-  returns   returns[]
+  user               users                @relation(fields: [user_id], references: [id])
+  coupon             coupons?             @relation(fields: [coupon_id], references: [id])
+  items              order_items[]
+  payments           payments[]
+  shipments          shipments[]
+  returns            returns[]
+  shipping_addresses shipping_addresses[]
 
   @@index([user_id, status])
   @@index([created_at])
@@ -572,6 +571,30 @@ model order_items {
   @@index([variant_id])
   @@index([vendor_id])
   @@map("order_items")
+}
+
+model shipping_addresses {
+  id         Int       @id @default(autoincrement())
+  order_id   Int
+  user_id    Int
+  firstname  String
+  lastname   String
+  phone_one  String
+  phone_two  String?
+  address    String
+  city       String
+  state      String
+  country    String
+  zip_code   String?
+  is_default Boolean   @default(false)
+  created_at DateTime  @default(now())
+  updated_at DateTime? @updatedAt
+
+  // Relations
+  user   users  @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  orders orders @relation(fields: [order_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
 }
 
 model payments {
@@ -813,7 +836,7 @@ model countries {
   name        String    @unique
   code        String    @unique
   currency_id Int
-  status    Boolean   @default(true)
+  status      Boolean   @default(true)
   created_at  DateTime  @default(now())
   updated_at  DateTime? @updatedAt
 
@@ -824,12 +847,12 @@ model countries {
 }
 
 model currencies {
-  id            Int       @id @default(autoincrement())
-  code          String    @unique
-  name          String
-  status        Boolean   @default(true)
-  created_at    DateTime  @default(now())
-  updated_at    DateTime? @updatedAt
+  id         Int       @id @default(autoincrement())
+  code       String    @unique
+  name       String
+  status     Boolean   @default(true)
+  created_at DateTime  @default(now())
+  updated_at DateTime? @updatedAt
 
   // Relations
   products  products[]
@@ -852,41 +875,39 @@ model services {
   updated_at    DateTime? @updatedAt @map("updated_at")
 
   // Relations
-  vendor     vendors            @relation(fields: [vendor_id], references: [id], onDelete: Cascade)
-  orderItems order_items[]
-  bookings   service_bookings[]
-  reviews    reviews[]
-  currency   currencies         @relation(fields: [currency_id], references: [id], onDelete: Cascade)
-  coupons    coupons[]
+  vendor                    vendors            @relation(fields: [vendor_id], references: [id], onDelete: Cascade)
+  orderItems                order_items[]
+  bookings                  service_bookings[]
+  reviews                   reviews[]
+  currency                  currencies         @relation(fields: [currency_id], references: [id], onDelete: Cascade)
+  coupons                   coupons[]
+  category_id               Int?
+  subcategory_id            Int?
+  childcategory_id          Int?
+  short_description         String?
+  tags                      String[]           @default([])
+  compare_at_price          Decimal?           @db.Decimal(10, 2)
+  buffer_mins               Int                @default(0)
+  max_bookings_per_slot     Int                @default(1)
+  is_remote                 Boolean            @default(false)
+  location_type             String             @default("vendor_location")
+  cancellation_window_hours Int                @default(24)
+  cancellation_fee_percent  Float              @default(0)
+  images                    String[]           @default([])
+  thumbnail                 String?
+  meta_title                String?
+  meta_description          String?
+  deleted_at                DateTime?
 
-  @@index([vendor_id, status])
-  @@map("services")
-  category_id Int?
-  subcategory_id Int?
-  childcategory_id Int?
-  short_description String?
-  tags String[] @default([])
-  compare_at_price Decimal? @db.Decimal(10, 2)
-  buffer_mins Int @default(0)
-  max_bookings_per_slot Int @default(1)
-  is_remote Boolean @default(false)
-  location_type String @default("vendor_location")
-  cancellation_window_hours Int @default(24)
-  cancellation_fee_percent Float @default(0)
-  images String[] @default([])
-  thumbnail String?
-  meta_title String?
-  meta_description String?
-  deleted_at DateTime?
-
-  category categories? @relation(fields: [category_id], references: [id], onDelete: SetNull)
-  subcategory subcategories? @relation(fields: [subcategory_id], references: [id], onDelete: SetNull)
+  category      categories?      @relation(fields: [category_id], references: [id], onDelete: SetNull)
+  subcategory   subcategories?   @relation(fields: [subcategory_id], references: [id], onDelete: SetNull)
   childcategory childcategories? @relation(fields: [childcategory_id], references: [id], onDelete: SetNull)
 
+  @@index([vendor_id, status])
   @@index([category_id])
   @@index([subcategory_id])
   @@index([childcategory_id])
-
+  @@map("services")
 }
 
 model service_bookings {

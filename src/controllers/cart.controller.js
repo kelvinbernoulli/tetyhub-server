@@ -150,17 +150,17 @@ export const validateCoupon = async (req, res) => {
 
 export const processCheckout = async (req, res) => {
     try {
-        const { session, params, body } = req;
+        const { session, body } = req;
         const user = session?.user;
         
         const { error, value } = checkoutSchema.validate(body, { abortEarly: false, stripUnknown: true });
         if (error) {
-            return respondWithError(res, 400, error.details[0].message, ERROR_CODES.VALIDATION_ERROR);
+            return respondWithError(res, 400, error.details.map((e) => e.message).join(', '), ERROR_CODES.VALIDATION_ERROR);
         }
 
         const result = await Cart.processCheckout(user, value);
         if (result?.error) {
-            return respondWithError(res, result.code, result.error, ERROR_CODES.VALIDATION_ERROR);
+            return respondWithError(res, result.code || 400, result.error, ERROR_CODES.VALIDATION_ERROR);
         }
 
         return respondWithSuccess(res, 200, 'Order placed successfully', result);
