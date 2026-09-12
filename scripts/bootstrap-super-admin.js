@@ -7,6 +7,8 @@ const password = process.env.SUPER_ADMIN_PASSWORD;
 const firstname = process.env.SUPER_ADMIN_FIRSTNAME?.trim() || 'Super';
 const lastname = process.env.SUPER_ADMIN_LASTNAME?.trim() || 'Admin';
 
+// run npm run bootstrap:super-admin
+
 const fail = (message) => {
     throw new Error(message);
 };

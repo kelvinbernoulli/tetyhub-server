@@ -62,7 +62,7 @@ export const userSignup = async (req, res) => {
         return res.redirect(`${frontendBase}/verify-email?message=Verification email sent. Please check your email to verify your account.`);
 
     } catch (error) {
-        console.error("Error during vendor registration:", error);
+        console.error("Error during user registration:", error);
         return respondWithError(res, 500, 'Internal server error', ERROR_CODES.INTERNAL_SERVER_ERROR);
     }
 };
