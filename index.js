@@ -155,15 +155,15 @@ app.use((err, req, res, next) => {
 });
 
 // Startup
-const stopCheckoutWorker = startCheckoutWorker();
-const shutdown = (signal) => {
-    stopCheckoutWorker();
-    console.log(`${signal} received: closing server`);
-    server.close(() => {
-        console.log('Server closed');
-        process.exit(0);
-    });
-};
+// const stopCheckoutWorker = startCheckoutWorker();
+// const shutdown = (signal) => {
+//     stopCheckoutWorker();
+//     console.log(`${signal} received: closing server`);
+//     server.close(() => {
+//         console.log('Server closed');
+//         process.exit(0);
+//     });
+// };
 
 const server = app.listen(PORT, () => {
     console.log(`Server running on port ${PORT} — http://localhost:${PORT}/`);
