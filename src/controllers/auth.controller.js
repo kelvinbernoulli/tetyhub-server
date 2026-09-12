@@ -59,7 +59,8 @@ export const userSignup = async (req, res) => {
         delete body.password;
         await Auth.activateAccount(createUser.id);
 
-        return respondWithSuccess(res, 200, "Verification email sent, please check your email.", body);
+        return res.redirect(`${frontendBase}/verify-email?message=Verification email sent. Please check your email to verify your account.`);
+
     } catch (error) {
         console.error("Error during vendor registration:", error);
         return respondWithError(res, 500, 'Internal server error', ERROR_CODES.INTERNAL_SERVER_ERROR);
@@ -99,6 +100,8 @@ export const verifyEmail = async (req, res) => {
         await redisClient.del(redisKey);
 
         return respondWithSuccess(res, 200, 'Email verified successfully');
+
+        return res.redirect(`${frontendBase}/login?message=Email verified successfully`);
     } catch (error) {
         console.error('Error verifying email:', error);
         return respondWithError(res, 500, 'Internal server error', ERROR_CODES.INTERNAL_SERVER_ERROR);
