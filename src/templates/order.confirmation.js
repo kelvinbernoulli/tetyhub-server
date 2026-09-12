@@ -1,17 +1,31 @@
-import { Header, Footer } from "./layout.js";
+import { Header, Footer } from './layout.js';
 
 export const orderConfirmation = (user, order) => {
-    console.log("Generating order confirmation email for order:", order);
+    const escape = (value) =>
+        String(value ?? '').replace(
+            /[&<>"']/g,
+            (char) =>
+                ({
+                    '&': '&amp;',
+                    '<': '&lt;',
+                    '>': '&gt;',
+                    '"': '&quot;',
+                    "'": '&#39;',
+                })[char]
+        );
+    const currency = escape(order.currency || '');
 
     // 1. Correctly map and stringify table rows for items
-    const orderItems = order.items.map(item => `
+    const orderItems = order.items
+        .map(
+            (item) => `
     <tr>
       <td style="padding: 12px 0; border-bottom: 1px solid #eee;">
         <table width="100%" cellpadding="0" cellspacing="0">
           <tr>
             <td style="font-size: 14px; color: #333;">
-              <strong>${item.product_name}</strong>
-              ${item.variant_name ? `<br/><span style="color:#777;">${item.variant_name}</span>` : ""}
+              <strong>${escape(item.product_name)}</strong>
+              ${item.variant_name ? `<br/><span style="color:#777;">${escape(item.variant_name)}</span>` : ''}
             </td>
 
             <td align="center" style="font-size: 14px; color: #555;">
@@ -19,13 +33,15 @@ export const orderConfirmation = (user, order) => {
             </td>
 
             <td align="right" style="font-size: 14px; color: #111; font-weight: 600;">
-              ₦${Number(item.subtotal).toLocaleString()}
+              ${currency} ${Number(item.subtotal).toLocaleString()}
             </td>
           </tr>
         </table>
       </td>
     </tr>
-  `).join("");
+  `
+        )
+        .join('');
 
     // 2. Wrap the core email template correctly in a single return string statement
     return `
@@ -46,7 +62,7 @@ export const orderConfirmation = (user, order) => {
         </p>
 
         <p style="text-align: center; font-size: 15px; line-height: 1.6; color: #555;">
-          Hi <strong>${user.firstname}</strong>,
+          Hi <strong>${escape(user.firstname)}</strong>,
           <br />
           Thank you for shopping with us.
           <br />
@@ -60,7 +76,7 @@ export const orderConfirmation = (user, order) => {
           margin: 25px 0;
         ">
           <p style="margin: 0 0 8px 0; color: #333;">
-            <strong>Order ID:</strong> #${order.order_number}
+            <strong>Order ID:</strong> #${escape(order.order_number)}
           </p>
 
           <p style="margin: 0 0 8px 0; color: #333;">
@@ -88,7 +104,7 @@ export const orderConfirmation = (user, order) => {
             </td>
 
             <td align="right" style="padding: 6px 0; color: #111;">
-              ₦${Number(order.subtotal).toLocaleString()}
+              ${currency} ${Number(order.subtotal).toLocaleString()}
             </td>
           </tr>
 
@@ -98,23 +114,24 @@ export const orderConfirmation = (user, order) => {
             </td>
 
             <td align="right" style="padding: 6px 0; color: #111;">
-              ₦${Number(order.shipping_fee).toLocaleString()}
+              ${currency} ${Number(order.shipping_fee).toLocaleString()}
             </td>
           </tr>
 
-          ${Number(order.discount || 0) > 0
-            ? `
+          ${
+              Number(order.discount || 0) > 0
+                  ? `
                 <tr>
                   <td style="padding: 6px 0; color: #555;">
                     Discount
                   </td>
 
                   <td align="right" style="padding: 6px 0; color: #28a745;">
-                    - ₦${Number(order.discount).toLocaleString()}
+                    - ${currency} ${Number(order.discount).toLocaleString()}
                   </td>
                 </tr>
               `
-            : ""
+                  : ''
           }
 
           <tr>
@@ -133,7 +150,7 @@ export const orderConfirmation = (user, order) => {
               font-weight: 700;
               color: #111;
             ">
-              ₦${Number(order.total).toLocaleString()}
+              ${currency} ${Number(order.total).toLocaleString()}
             </td>
           </tr>
         </table>

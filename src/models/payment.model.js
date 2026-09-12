@@ -1,363 +1,286 @@
-import pool from "#services/pg_pool.js";
-import { generateOrderReference } from "#utils/helpers.js";
-import { initializePaystack, initializeStripe } from "#utils/payment.js";
-import Order from "./order.model.js";
+import BookingPayment from '#models/booking-payment.model.js';
+import { randomUUID } from 'node:crypto';
+import pool from '#services/pg_pool.js';
+import * as gatewayApi from '#utils/payment.js';
+import {
+    CheckoutError,
+    assertGatewayCurrency,
+    minorUnits,
+    transaction,
+} from '#utils/checkout.js';
 
-class Payment {
+export class Payment {
+    static gatewayApi = gatewayApi;
     static async initiatePayment(userId, orderId, gateway) {
-        const client = await pool.connect();
-        try {
-            await client.query('BEGIN');
-
-            // 1. Fetch order
-            const { rows: orderRows } = await client.query(
-                `SELECT o.*, u.email FROM orders o
-                JOIN users u ON u.id = o.user_id
-                WHERE o.id = $1 AND o.user_id = $2
-                AND o.payment_status = 'unpaid'`,
+        const attempt = await transaction(pool, async (client) => {
+            const { rows } = await client.query(
+                `SELECT o.*, c.code AS currency, COALESCE(o.contact_email,u.email) AS email
+                FROM orders o JOIN users u ON u.id = o.user_id JOIN currencies c ON c.id = o.currency_id
+                WHERE o.id = $1 AND o.user_id = $2 FOR UPDATE OF o`,
                 [orderId, userId]
             );
-
-            if (orderRows.length === 0) {
-                return { error: 'Order not found or already paid', code: 404 };
-            }
-
-            const order = orderRows[0];
-            const reference = generateOrderReference(orderId);
-
-            let gatewayResponse;
-            let gatewayRef;
-
-            if (gateway === 'paystack') {
-                gatewayResponse = await initializePaystack({
-                    email: order.email,
-                    amount: order.total,
-                    reference,
-                    metadata: { 
-                        order_id: orderId, 
-                        user_id: userId 
-                    }
-                });
-                gatewayRef = reference;
-            } else if (gateway === 'stripe') {
-                gatewayResponse = await initializeStripe({
-                    amount: order.total,
-                    orderId,
-                    email: order.email,
-                    metadata: { order_id: orderId, user_id: userId }
-                });
-                gatewayRef = gatewayResponse.id; // stripe payment intent id
-            } else {
-                return { error: 'Invalid payment gateway', code: 400 };
-            }
-
-            // 2. Create payment record
-            await client.query(
-                `INSERT INTO payments (order_id, user_id, vendor_id, gateway, gateway_ref, amount, currency, meta)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                ON CONFLICT (gateway_ref) DO NOTHING`,
-                [
-                    orderId, userId, order.vendor_id,
-                    gateway, gatewayRef, order.total,
-                    gateway === 'paystack' ? 'NGN' : 'USD',
-                    JSON.stringify(gatewayResponse)
-                ]
-            );
-
-            // 3. Update order payment method
-            await client.query(
-                `UPDATE orders SET payment_method = $1, updated_at = NOW() WHERE id = $2`,
-                [gateway, orderId]
-            );
-
-            await client.query('COMMIT');
-
-            return {
-                gateway,
-                reference: gatewayRef,
-                ...(gateway === 'paystack' && {
-                    authorization_url: gatewayResponse.data.authorization_url
-                }),
-                ...(gateway === 'stripe' && {
-                    client_secret: gatewayResponse.client_secret
-                })
-            };
-        } catch (error) {
-            await client.query('ROLLBACK');
-            console.error("Error initiating payment:", error);
-            throw error;
-        } finally {
-            client.release();
-        }
-    }
-
-    static async verifyPayment(gateway, reference) {
-        const client = await pool.connect();
-        try {
-            await client.query('BEGIN');
-
-            // 1. Find payment record
-            const { rows: paymentRows } = await client.query(
-                `SELECT * FROM payments WHERE gateway_ref = $1 AND gateway = $2`,
-                [reference, gateway]
-            );
-
-            if (paymentRows.length === 0) {
-                return { error: 'Payment record not found', code: 404 };
-            }
-
-            const payment = paymentRows[0];
-
-            if (payment.status === 'success') {
-                return { error: 'Payment already verified', code: 409 };
-            }
-
-            // 2. Verify with gateway
-            let isSuccess = false;
-            let gatewayData;
-
-            if (gateway === 'paystack') {
-                gatewayData = await Payment.verifyPaystack(reference);
-                isSuccess = gatewayData.data.status === 'success';
-            } else if (gateway === 'stripe') {
-                gatewayData = await Payment.verifyStripe(reference);
-                isSuccess = gatewayData.status === 'succeeded';
-            }
-
-            const paymentStatus = isSuccess ? 'success' : 'failed';
-            const orderPaymentStatus = isSuccess ? 'paid' : 'failed';
-            const orderStatus = isSuccess ? 'processing' : 'pending';
-
-            // 3. Update payment record
-            await client.query(
-                `UPDATE payments SET
-                    status = $1,
-                    paid_at = $2,
-                    meta = $3,
-                    updated_at = NOW()
-                WHERE gateway_ref = $4`,
-                [
-                    paymentStatus,
-                    isSuccess ? new Date() : null,
-                    JSON.stringify(gatewayData),
-                    reference
-                ]
-            );
-
-            // 4. Update order status
-            await client.query(
-                `UPDATE orders SET
-                    payment_status = $1,
-                    status = $2,
-                    updated_at = NOW()
-                WHERE id = $3`,
-                [orderPaymentStatus, orderStatus, payment.order_id]
-            );
-
-            await client.query('COMMIT');
-
-            return await Order.getOrderById(payment.order_id, payment.user_id);
-        } catch (error) {
-            await client.query('ROLLBACK');
-            console.error("Error verifying payment:", error);
-            throw error;
-        } finally {
-            client.release();
-        }
-    }
-
-    static async processRefund(userId, { order_id, amount, reason, refund_method = 'original_payment' }) {
-        const client = await pool.connect();
-        try {
-            await client.query('BEGIN');
-
-            // 1. Fetch payment for the order
-            const { rows: paymentRows } = await client.query(
-                `SELECT p.* FROM payments p
-                JOIN orders o ON o.id = p.order_id
-                WHERE p.order_id = $1
-                AND p.status = 'success'
-                AND o.user_id = $2`,
-                [order_id, userId]
-            );
-
-            if (paymentRows.length === 0) {
-                return { error: 'No successful payment found for this order', code: 404 };
-            }
-
-            const payment = paymentRows[0];
-
-            // 2. Check if already refunded
-            const { rows: existingRefund } = await client.query(
-                `SELECT id FROM refunds 
-                WHERE order_id = $1 AND status = 'success'`,
-                [order_id]
-            );
-
-            if (existingRefund.length > 0) {
-                return { error: 'Order has already been refunded', code: 409 };
-            }
-
-            // 3. Check order status
-            const { rows: orderRows } = await client.query(
-                `SELECT * FROM orders WHERE id = $1`,
-                [order_id]
-            );
-
-            if (orderRows.length === 0) {
-                return { error: 'Order not found', code: 404 };
-            }
-
-            const order = orderRows[0];
-
-            if (!['pending', 'processing'].includes(order.status)) {
-                return { error: `Cannot refund an order with status: ${order.status}`, code: 422 };
-            }
-
-            // 4. Determine refund amount
-            const refundAmount = amount ?? payment.amount;
-            if (refundAmount > payment.amount) {
-                return { error: `Refund amount cannot exceed original payment of ${payment.amount}`, code: 422 };
-            }
-
-            // 5. Process refund with gateway or store credit
-            let gatewayData = null;
-            let gatewayRef = null;
-            let isSuccess = false;
-            const refundGateway = refund_method === 'store_credit' ? 'store_credit' : payment.gateway;
-
-            if (refund_method === 'store_credit') {
-                gatewayData = {
-                    method: 'store_credit',
-                    amount: refundAmount,
-                    reason: reason ?? null,
-                    status: 'success'
-                };
-                isSuccess = true;
-            } else if (payment.gateway === 'paystack') {
-                gatewayData = await Payment.refundPaystack({
-                    reference: payment.gateway_ref,
-                    amount: refundAmount,
-                    merchant_note: reason ?? 'Customer refund request'
-                });
-                gatewayRef = gatewayData.data.id.toString();
-                isSuccess = gatewayData.status === true;
-            } else if (payment.gateway === 'stripe') {
-                gatewayData = await Payment.refundStripe({
-                    paymentIntentId: payment.gateway_ref,
-                    amount: refundAmount,
-                    reason
-                });
-                gatewayRef = gatewayData.id;
-                isSuccess = gatewayData.status === 'succeeded' || gatewayData.status === 'pending';
-            }
-
-            if (!isSuccess) {
-                const refundStatus = gatewayData?.status || 'failed';
-                await client.query(
-                    `INSERT INTO refunds 
-                    (payment_id, order_id, user_id, gateway, gateway_ref, amount, reason, status, refunded_at, meta)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-                    [
-                        payment.id, order_id, userId,
-                        refundGateway, gatewayRef,
-                        refundAmount, reason ?? null,
-                        refundStatus,
-                        null,
-                        JSON.stringify(gatewayData)
-                    ]
-                );
-
-                await client.query('COMMIT');
-
+            const order = rows[0];
+            if (!order) throw new CheckoutError('Order not found', 404);
+            if (order.payment_status === 'paid')
                 return {
-                    refund_status: refundStatus,
-                    gateway: payment.gateway,
-                    amount: refundAmount,
-                    order_id,
-                    reason: reason ?? null
+                    payment_status: 'paid',
+                    order_id: order.id,
+                    status: order.status,
                 };
+            if (
+                order.status !== 'pending' ||
+                order.payment_status !== 'unpaid' ||
+                !order.reservation_expires_at ||
+                new Date(order.reservation_expires_at) <= new Date()
+            )
+                throw new CheckoutError('Order is no longer payable', 409);
+            if (gateway !== order.payment_method)
+                throw new CheckoutError(
+                    'Use the payment gateway selected at checkout',
+                    409
+                );
+            assertGatewayCurrency(gateway, order.currency);
+            const existing = await client.query(
+                'SELECT * FROM payments WHERE order_id = $1 ORDER BY id LIMIT 1 FOR UPDATE',
+                [order.id]
+            );
+            let payment = existing.rows[0];
+            if (payment?.checkout_data)
+                return JSON.parse(payment.checkout_data);
+            if (
+                payment?.initializing_until &&
+                new Date(payment.initializing_until) > new Date()
+            )
+                throw new CheckoutError(
+                    'Payment initialization is in progress; retry shortly',
+                    409
+                );
+            if (!payment) {
+                payment = (
+                    await client.query(
+                        `INSERT INTO payments (order_id,user_id,gateway,gateway_ref,amount,currency_id)
+                    VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+                        [
+                            order.id,
+                            userId,
+                            gateway,
+                            `checkout-${randomUUID()}`,
+                            order.total,
+                            order.currency_id,
+                        ]
+                    )
+                ).rows[0];
             }
-
-            const refundStatus = isSuccess ? 'success' : 'failed';
-
-            // 6. Insert refund record
             await client.query(
-                `INSERT INTO refunds 
-                (payment_id, order_id, user_id, gateway, gateway_ref, amount, reason, status, refunded_at, meta)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+                "UPDATE payments SET initializing_until = NOW() + INTERVAL '60 seconds' WHERE id = $1",
+                [payment.id]
+            );
+            return { payment, order };
+        });
+        if (!attempt.payment) return attempt;
+        const { payment, order } = attempt;
+        try {
+            const args = {
+                email: order.email,
+                amount: order.total,
+                currency: order.currency,
+                reference: payment.gateway_ref,
+                metadata: {
+                    order_id: String(order.id),
+                    payment_reference: payment.gateway_ref,
+                },
+            };
+            const response =
+                gateway === 'paystack'
+                    ? await Payment.gatewayApi.initializePaystack(args)
+                    : await Payment.gatewayApi.initializeStripe(args);
+            const result = {
+                gateway,
+                reference: payment.gateway_ref,
+                ...(gateway === 'paystack'
+                    ? { authorization_url: response.authorization_url }
+                    : { client_secret: response.client_secret }),
+            };
+            await pool.query(
+                `UPDATE payments SET provider_ref = $1, checkout_data = $2, initializing_until = NULL, updated_at = NOW() WHERE id = $3`,
                 [
-                    payment.id, order_id, userId,
-                    refundGateway, gatewayRef,
-                    refundAmount, reason ?? null,
-                    refundStatus,
-                    isSuccess ? new Date() : null,
-                    JSON.stringify(gatewayData)
+                    gateway === 'paystack' ? payment.gateway_ref : response.id,
+                    JSON.stringify(result),
+                    payment.id,
                 ]
             );
-
-            if (isSuccess) {
-                // 7. Update payment status
-                await client.query(
-                    `UPDATE payments SET
-                        status = 'refunded',
-                        updated_at = NOW()
-                    WHERE id = $1`,
-                    [payment.id]
-                );
-
-                // 8. Update order status
-                await client.query(
-                    `UPDATE orders SET
-                        status = 'refunded',
-                        payment_status = 'refunded',
-                        updated_at = NOW()
-                    WHERE id = $1`,
-                    [order_id]
-                );
-
-                // 9. Restore stock
-                const { rows: orderItems } = await client.query(
-                    `SELECT * FROM order_items WHERE order_id = $1`,
-                    [order_id]
-                );
-
-                for (const item of orderItems) {
-                    if (item.variant_id) {
-                        await client.query(
-                            `UPDATE product_variants
-                            SET stock = stock + $1, updated_at = NOW()
-                            WHERE id = $2`,
-                            [item.quantity, item.variant_id]
-                        );
-                    } else {
-                        await client.query(
-                            `UPDATE products
-                            SET stock = stock + $1, updated_at = NOW()
-                            WHERE id = $2`,
-                            [item.quantity, item.product_id]
-                        );
-                    }
+            return result;
+        } catch (error) {
+            await pool.query(
+                'UPDATE payments SET initializing_until = NULL WHERE id = $1',
+                [payment.id]
+            );
+            if (gateway === 'paystack') {
+                // A timeout may mean the provider accepted the stable reference. Never mint a second charge.
+                try {
+                    const verified = await Payment.gatewayApi.verifyPaystack(
+                        payment.gateway_ref
+                    );
+                    const settled = await Payment.settle('paystack', verified);
+                    return {
+                        gateway,
+                        reference: payment.gateway_ref,
+                        ...settled,
+                        verification_required:
+                            settled.payment_status !== 'paid',
+                    };
+                } catch {
+                    /* Keep the original initialization failure; the retry route uses the same reference. */
                 }
             }
-
-            await client.query('COMMIT');
-
-            return {
-                refund_status: refundStatus,
-                gateway: payment.gateway,
-                amount: refundAmount,
-                order_id,
-                reason: reason ?? null
-            };
-        } catch (error) {
-            await client.query('ROLLBACK');
-            console.error("Error processing refund:", error);
             throw error;
-        } finally {
-            client.release();
         }
     }
-}
 
+    static async verifyPayment(gateway, reference, userId) {
+        if (!['paystack', 'stripe'].includes(gateway) || !reference || !userId)
+            throw new CheckoutError(
+                'Invalid payment verification request',
+                400
+            );
+        const { rows } = await pool.query(
+            'SELECT * FROM payments WHERE gateway = $1 AND gateway_ref = $2 AND user_id = $3',
+            [gateway, reference, userId]
+        );
+        const payment = rows[0];
+        if (!payment) throw new CheckoutError('Payment not found', 404);
+        const providerRef =
+            payment.provider_ref || (gateway === 'paystack' ? reference : null);
+        if (!providerRef)
+            throw new CheckoutError('Payment is still initializing', 409);
+        const data =
+            gateway === 'paystack'
+                ? await Payment.gatewayApi.verifyPaystack(providerRef)
+                : await Payment.gatewayApi.verifyStripe(providerRef);
+        return Payment.settle(gateway, data);
+    }
+
+    static async settle(gateway, data, eventId = null) {
+        const reference =
+            gateway === 'paystack'
+                ? data.reference
+                : data.metadata?.payment_reference;
+        if (!reference)
+            throw new CheckoutError('Missing payment reference', 400);
+        if (typeof reference === 'string' && reference.startsWith('booking-'))
+            return BookingPayment.settle(gateway, data, eventId);
+        return transaction(pool, async (client) => {
+            // All order mutations lock the order first, including expiry and cancellation.
+            const lookup = await client.query(
+                'SELECT order_id FROM payments WHERE gateway = $1 AND gateway_ref = $2',
+                [gateway, reference]
+            );
+            if (!lookup.rows.length)
+                throw new CheckoutError('Payment not found', 404);
+            const order = (
+                await client.query(
+                    'SELECT * FROM orders WHERE id = $1 FOR UPDATE',
+                    [lookup.rows[0].order_id]
+                )
+            ).rows[0];
+            const payment = (
+                await client.query(
+                    `SELECT p.*, c.code AS currency FROM payments p JOIN currencies c ON c.id = p.currency_id
+                WHERE p.gateway = $1 AND p.gateway_ref = $2 FOR UPDATE OF p`,
+                    [gateway, reference]
+                )
+            ).rows[0];
+            if (
+                gateway === 'stripe' &&
+                ((payment.provider_ref && payment.provider_ref !== data.id) ||
+                    String(data.metadata?.order_id) !== String(order.id))
+            )
+                throw new CheckoutError('Payment identity mismatch', 409);
+            const success =
+                gateway === 'paystack'
+                    ? data.status === 'success'
+                    : data.status === 'succeeded';
+            const amount =
+                gateway === 'stripe' && success
+                    ? data.amount_received
+                    : data.amount;
+            if (
+                Number(amount) !== minorUnits(payment.amount) ||
+                String(data.currency).toUpperCase() !== payment.currency ||
+                minorUnits(order.total) !== minorUnits(payment.amount)
+            )
+                throw new CheckoutError(
+                    'Payment amount or currency mismatch',
+                    409
+                );
+            if (eventId) {
+                const inserted = await client.query(
+                    `INSERT INTO payment_events (payment_id,gateway,gateway_event_id,event_type)
+                    VALUES ($1,$2,$3,$4) ON CONFLICT (gateway,gateway_event_id) DO NOTHING RETURNING id`,
+                    [payment.id, gateway, eventId, data.status]
+                );
+                if (!inserted.rowCount)
+                    return {
+                        order_id: order.id,
+                        payment_status: order.payment_status,
+                        status: order.status,
+                    };
+            }
+            if (payment.status === 'success' || order.payment_status === 'paid')
+                return {
+                    order_id: order.id,
+                    payment_status: order.payment_status,
+                    status: order.status,
+                };
+            if (!success) {
+                // Pending and failed attempts never downgrade a paid order or close a reusable intent.
+                await client.query(
+                    'UPDATE payments SET meta = $1, updated_at = NOW() WHERE id = $2',
+                    [JSON.stringify({ status: data.status }), payment.id]
+                );
+                return {
+                    order_id: order.id,
+                    payment_status: order.payment_status,
+                    status: order.status,
+                };
+            }
+            await client.query(
+                `UPDATE payments SET status = 'success', provider_ref = $1, paid_at = NOW(), initializing_until = NULL, updated_at = NOW() WHERE id = $2`,
+                [gateway === 'stripe' ? data.id : reference, payment.id]
+            );
+            // A cancelled reservation must never be resurrected into fulfillment.
+            const status =
+                order.status === 'pending' ? 'processing' : 'payment_review';
+            await client.query(
+                "UPDATE orders SET payment_status = 'paid', status = $1, reservation_expires_at = NULL, updated_at = NOW() WHERE id = $2",
+                [status, order.id]
+            );
+            await client.query(
+                'INSERT INTO order_status_history (order_id,status,note) VALUES ($1,$2,$3)',
+                [
+                    order.id,
+                    status,
+                    status === 'processing'
+                        ? 'Payment confirmed'
+                        : 'Payment arrived after cancellation; refund review required',
+                ]
+            );
+            if (status === 'processing')
+                await client.query(
+                    'INSERT INTO checkout_notifications (order_id) VALUES ($1) ON CONFLICT (order_id) DO NOTHING',
+                    [order.id]
+                );
+            return { order_id: order.id, payment_status: 'paid', status };
+        });
+    }
+
+    // The legacy refund implementation could mark unissued store credit as refunded and
+    // restock a full order for a partial refund. Fail closed until a reconciled refund workflow exists.
+    static async processRefund() {
+        throw new CheckoutError(
+            'Automated refunds are unavailable; process and reconcile through the payment provider',
+            503
+        );
+    }
+}
 export default Payment;

@@ -1,3 +1,4 @@
+import * as BookingController from '#controllers/booking.controller.js';
 import * as SettingsController from "#controllers/settings.controller.js";
 import * as SupportTicketController from "#controllers/support.ticket.controller.js";
 import * as ProductController from "#controllers/product.controller.js";
@@ -52,6 +53,12 @@ router.post("/service/create", canCreate('services'), ServicesController.createS
 router.get("/services", canRead('services'), pagination, ServicesController.fetchServices);
 router.get("/service/:id", canRead('services'), ServicesController.viewService);
 router.patch("/service/update/:id", canUpdate('services'), ServicesController.updateService);
+
+//bookings (service permissions govern service fulfillment)
+router.get('/bookings', canRead('services'), BookingController.vendorList);
+router.get('/bookings/:bookingId', canRead('services'), BookingController.vendorView);
+router.patch('/bookings/:bookingId/status', canUpdate('services'), BookingController.vendorStatus);
+router.patch('/bookings/:bookingId/cancel', canUpdate('services'), BookingController.vendorCancel);
 
 //orders
 router.get("/orders", canRead('orders'), pagination, VendorController.getVendorOrders);

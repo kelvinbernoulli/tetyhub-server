@@ -1,11 +1,12 @@
 import axios from 'axios';
 
 export const paystack = axios.create({
-    baseURL: process.env.PAYSTACK_BASE_URL,
+    baseURL: process.env.PAYSTACK_BASE_URL || 'https://api.paystack.co',
+    timeout: 15000,
     headers: {
         Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-        'Content-Type': 'application/json'
-    }
+        'Content-Type': 'application/json',
+    },
 });
 
 export default paystack;

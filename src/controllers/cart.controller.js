@@ -1,8 +1,12 @@
-import Cart from "#models/cart.model.js";
-import VendorModel from "#models/vendor.model.js";
-import { addToCartSchema, checkoutSchema, upsertCartSchema } from "#schemas/cart.schema.js";
-import ERROR_CODES from "#utils/error.codes.js";
-import { respondWithError, respondWithSuccess } from "#utils/response.js";
+import Cart from '#models/cart.model.js';
+import VendorModel from '#models/vendor.model.js';
+import {
+    addToCartSchema,
+    checkoutSchema,
+    upsertCartSchema,
+} from '#schemas/cart.schema.js';
+import ERROR_CODES from '#utils/error.codes.js';
+import { respondWithError, respondWithSuccess } from '#utils/response.js';
 
 export const addToCart = async (req, res) => {
     try {
@@ -10,23 +14,40 @@ export const addToCart = async (req, res) => {
 
         const user = session?.user;
 
-        const { error, value } = addToCartSchema.validate(body, { abortEarly: false, stripUnknown: true });
+        const { error, value } = addToCartSchema.validate(body, {
+            abortEarly: false,
+            stripUnknown: true,
+        });
         if (error) {
-            return respondWithError(res, 400, error.details.map(err => err.message).join(", "), ERROR_CODES.VALIDATION_ERROR);
+            return respondWithError(
+                res,
+                400,
+                error.details.map((err) => err.message).join(', '),
+                ERROR_CODES.VALIDATION_ERROR
+            );
         }
-        console.log("Validated add to cart data:", value);
+        console.log('Validated add to cart data:', value);
 
         const result = await Cart.addToCart(user.id, value);
 
         if (result?.error) {
-            return respondWithError(res, 400, result.error, ERROR_CODES.VALIDATION_ERROR);
+            return respondWithError(
+                res,
+                400,
+                result.error,
+                ERROR_CODES.VALIDATION_ERROR
+            );
         }
 
-        return respondWithSuccess(res, 200, "Item added to cart", result);
-
+        return respondWithSuccess(res, 200, 'Item added to cart', result);
     } catch (error) {
-        console.error("Add to cart controller error:", error);
-        return respondWithError(res, 500, 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);
+        console.error('Add to cart controller error:', error);
+        return respondWithError(
+            res,
+            500,
+            'Internal Server Error',
+            ERROR_CODES.INTERNAL_SERVER_ERROR
+        );
     }
 };
 
@@ -36,20 +57,35 @@ export const cartItems = async (req, res) => {
         const user = session?.user;
 
         if (!user) {
-            return respondWithError(res, 401, 'Unauthorized', ERROR_CODES.UNAUTHORIZED);
+            return respondWithError(
+                res,
+                401,
+                'Unauthorized',
+                ERROR_CODES.UNAUTHORIZED
+            );
         }
 
-        const result = await Cart.getCartItems(user.id, user.vendor_id, pagination);
+        const result = await Cart.getCartItems(user.id, pagination);
 
         // Handle model-level errors
         if (result?.error) {
-            return respondWithError(res, result.code, result.error, ERROR_CODES.VALIDATION_ERROR);
+            return respondWithError(
+                res,
+                result.code,
+                result.error,
+                ERROR_CODES.VALIDATION_ERROR
+            );
         }
 
         return respondWithSuccess(res, 200, 'Item added to cart', result);
     } catch (error) {
-        console.error("Error adding to cart:", error);
-        return respondWithError(res, 500, 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);
+        console.error('Error adding to cart:', error);
+        return respondWithError(
+            res,
+            500,
+            'Internal Server Error',
+            ERROR_CODES.INTERNAL_SERVER_ERROR
+        );
     }
 };
 
@@ -58,20 +94,43 @@ export const upsertCart = async (req, res) => {
         const { body, session } = req;
         const user = session?.user;
 
-        const { error, value } = upsertCartSchema.validate(body, { abortEarly: false, stripUnknown: true });
+        const { error, value } = upsertCartSchema.validate(body, {
+            abortEarly: false,
+            stripUnknown: true,
+        });
         if (error) {
-            return respondWithError(res, 400, error.details[0].message, ERROR_CODES.VALIDATION_ERROR);
+            return respondWithError(
+                res,
+                400,
+                error.details[0].message,
+                ERROR_CODES.VALIDATION_ERROR
+            );
         }
 
         const result = await Cart.updateCart(user.id, value);
         if (result?.error) {
-            return respondWithError(res, result.code, result.error, ERROR_CODES.VALIDATION_ERROR);
+            return respondWithError(
+                res,
+                result.code,
+                result.error,
+                ERROR_CODES.VALIDATION_ERROR
+            );
         }
 
-        return respondWithSuccess(res, 200, 'Cart updated successfully', result);
+        return respondWithSuccess(
+            res,
+            200,
+            'Cart updated successfully',
+            result
+        );
     } catch (error) {
-        console.error("Error upserting cart item:", error);
-        return respondWithError(res, 500, 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);
+        console.error('Error upserting cart item:', error);
+        return respondWithError(
+            res,
+            500,
+            'Internal Server Error',
+            ERROR_CODES.INTERNAL_SERVER_ERROR
+        );
     }
 };
 
@@ -81,25 +140,45 @@ export const removeFromCart = async (req, res) => {
         const user = session?.user;
 
         if (!user) {
-            return respondWithError(res, 401, 'Unauthorized', ERROR_CODES.UNAUTHORIZED);
+            return respondWithError(
+                res,
+                401,
+                'Unauthorized',
+                ERROR_CODES.UNAUTHORIZED
+            );
         }
 
         const { itemId } = params;
 
         if (!itemId) {
-            return respondWithError(res, 400, 'Cart item ID is required', ERROR_CODES.BAD_REQUEST);
+            return respondWithError(
+                res,
+                400,
+                'Cart item ID is required',
+                ERROR_CODES.BAD_REQUEST
+            );
         }
 
         const result = await Cart.removeFromCart(user.id, itemId);
 
         if (result?.error) {
-            return respondWithError(res, result.code, result.error, ERROR_CODES.RESOURCE_NOT_FOUND);
+            return respondWithError(
+                res,
+                result.code,
+                result.error,
+                ERROR_CODES.RESOURCE_NOT_FOUND
+            );
         }
 
         return respondWithSuccess(res, 200, 'Item removed from cart', result);
     } catch (error) {
-        console.error("Error removing cart item:", error);
-        return respondWithError(res, 500, 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);
+        console.error('Error removing cart item:', error);
+        return respondWithError(
+            res,
+            500,
+            'Internal Server Error',
+            ERROR_CODES.INTERNAL_SERVER_ERROR
+        );
     }
 };
 
@@ -110,15 +189,29 @@ export const previewCheckout = async (req, res) => {
 
         const { coupon_code } = query;
 
-        const result = await Cart.previewCheckout(user.id, coupon_code);
+        const result = await Cart.previewCheckout(
+            user.id,
+            coupon_code,
+            query.country
+        );
         if (result?.error) {
-            return respondWithError(res, result.code, result.error, ERROR_CODES.VALIDATION_ERROR);
+            return respondWithError(
+                res,
+                result.code,
+                result.error,
+                ERROR_CODES.VALIDATION_ERROR
+            );
         }
 
         return respondWithSuccess(res, 200, 'Checkout preview', result);
     } catch (error) {
-        console.error("Error previewing checkout:", error);
-        return respondWithError(res, 500, 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);
+        console.error('Error previewing checkout:', error);
+        return respondWithError(
+            res,
+            500,
+            'Internal Server Error',
+            ERROR_CODES.INTERNAL_SERVER_ERROR
+        );
     }
 };
 
@@ -127,24 +220,39 @@ export const validateCoupon = async (req, res) => {
         const { session, params, body } = req;
         const user = session?.user;
 
-        const { coupon_code, subtotal } = body;
+        const { coupon_code, country } = body;
 
-        if (!coupon_code || !subtotal) {
-            return respondWithError(res, 400, 'Coupon code and subtotal are required', ERROR_CODES.VALIDATION_ERROR);
+        if (!coupon_code) {
+            return respondWithError(
+                res,
+                400,
+                'Coupon code is required',
+                ERROR_CODES.VALIDATION_ERROR
+            );
         }
 
-        const result = await Cart.validateCoupon(coupon_code, user.id, subtotal);
+        const result = await Cart.validateCoupon(coupon_code, user.id, country);
         if (result?.error) {
-            return respondWithError(res, result.code, result.error, ERROR_CODES.VALIDATION_ERROR);
+            return respondWithError(
+                res,
+                result.code,
+                result.error,
+                ERROR_CODES.VALIDATION_ERROR
+            );
         }
 
         return respondWithSuccess(res, 200, 'Coupon applied successfully', {
             discount: result.discount,
-            coupon: result.coupon
+            coupon: result.coupon ? { code: result.coupon.code } : null,
         });
     } catch (error) {
-        console.error("Error validating coupon:", error);
-        return respondWithError(res, 500, 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);
+        console.error('Error validating coupon:', error);
+        return respondWithError(
+            res,
+            500,
+            'Internal Server Error',
+            ERROR_CODES.INTERNAL_SERVER_ERROR
+        );
     }
 };
 
@@ -152,20 +260,42 @@ export const processCheckout = async (req, res) => {
     try {
         const { session, body } = req;
         const user = session?.user;
-        
-        const { error, value } = checkoutSchema.validate(body, { abortEarly: false, stripUnknown: true });
+
+        const { error, value } = checkoutSchema.validate(
+            {
+                ...body,
+                idempotency_key:
+                    req.get('Idempotency-Key') || body.idempotency_key,
+            },
+            { abortEarly: false, stripUnknown: true }
+        );
         if (error) {
-            return respondWithError(res, 400, error.details.map((e) => e.message).join(', '), ERROR_CODES.VALIDATION_ERROR);
+            return respondWithError(
+                res,
+                400,
+                error.details.map((e) => e.message).join(', '),
+                ERROR_CODES.VALIDATION_ERROR
+            );
         }
 
         const result = await Cart.processCheckout(user, value);
         if (result?.error) {
-            return respondWithError(res, result.code || 400, result.error, ERROR_CODES.VALIDATION_ERROR);
+            return respondWithError(
+                res,
+                result.code || 400,
+                result.error,
+                ERROR_CODES.VALIDATION_ERROR
+            );
         }
 
-        return respondWithSuccess(res, 200, 'Order placed successfully', result);
+        return respondWithSuccess(res, 200, 'Checkout saved', result);
     } catch (error) {
-        console.error("Error processing checkout:", error);
-        return respondWithError(res, 500, 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);
+        console.error('Error processing checkout:', error);
+        return respondWithError(
+            res,
+            500,
+            'Internal Server Error',
+            ERROR_CODES.INTERNAL_SERVER_ERROR
+        );
     }
 };

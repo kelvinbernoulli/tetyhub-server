@@ -55,29 +55,32 @@ enum CategoryType {
 // ===============================================
 
 model users {
-  id                       Int        @id @default(autoincrement())
+  coupon_usage             coupon_usage[]
+  changed_order_statuses   order_status_history[]
+  id                       Int                    @id @default(autoincrement())
   firstname                String?
   lastname                 String?
-  email                    String     @unique
+  email                    String                 @unique
   password                 String
-  phone                    String?    @unique
+  phone                    String?                @unique
   country_id               Int?
-  role                     UserRole   @default(CUSTOMER)
-  google_id                String?    @unique
-  status                   UserStatus @default(ACTIVE)
-  email_verified           Boolean    @default(false)
+  role                     UserRole               @default(CUSTOMER)
+  google_id                String?                @unique
+  status                   UserStatus             @default(ACTIVE)
+  email_verified           Boolean                @default(false)
   email_verification_token String?
   email_verified_at        DateTime?
-  legacy_admin_roles       String[]   @default([]) @map("admin_role")
-  auth_version             Int        @default(1)
-  created_at               DateTime   @default(now())
-  updated_at               DateTime?  @updatedAt
+  legacy_admin_roles       String[]               @default([]) @map("admin_role")
+  auth_version             Int                    @default(1)
+  created_at               DateTime               @default(now())
+  updated_at               DateTime?              @updatedAt
 
   // Relations
   country                   countries?               @relation(fields: [country_id], references: [id])
   user_info                 users_info?
   vendors                   vendors?
   orders                    orders[]
+  service_bookings          service_bookings[]
   payments                  payments[]
   carts                     carts[]
   wishlists                 wishlist_items[]
@@ -161,6 +164,7 @@ model vendors {
   admins           admins[]
   admin_audit_logs admin_audit_logs[]
   services         services[]
+  bookings         service_bookings[]
 
   @@index([country_id])
 }
@@ -508,24 +512,33 @@ model wishlist_items {
 // ===============================================
 
 model orders {
-  id               Int       @id @default(autoincrement())
-  user_id          Int
-  order_number     String    @unique
-  subtotal         Decimal   @db.Decimal(10, 2)
-  shipping_fee     Decimal   @default(0) @db.Decimal(10, 2)
-  tax              Decimal   @default(0) @db.Decimal(10, 2)
-  discount         Decimal   @default(0) @db.Decimal(10, 2)
-  total            Decimal   @db.Decimal(10, 2)
-  note             String?
-  coupon_id        Int?
-  coupon_code      String?
-  status           String    @default("pending")
-  payment_status   String    @default("unpaid")
-  payment_method   String?
-  shipping_address Json?
-  billing_address  Json?
-  created_at       DateTime  @default(now())
-  updated_at       DateTime? @updatedAt
+  currency               currencies?             @relation(fields: [currency_id], references: [id])
+  coupon_usage           coupon_usage?
+  status_history         order_status_history[]
+  checkout_notification  checkout_notifications?
+  currency_id            Int?
+  checkout_key           String?
+  checkout_hash          String?
+  contact_email          String?
+  reservation_expires_at DateTime?
+  id                     Int                     @id @default(autoincrement())
+  user_id                Int
+  order_number           String                  @unique
+  subtotal               Decimal                 @db.Decimal(10, 2)
+  shipping_fee           Decimal                 @default(0) @db.Decimal(10, 2)
+  tax                    Decimal                 @default(0) @db.Decimal(10, 2)
+  discount               Decimal                 @default(0) @db.Decimal(10, 2)
+  total                  Decimal                 @db.Decimal(10, 2)
+  note                   String?
+  coupon_id              Int?
+  coupon_code            String?
+  status                 String                  @default("pending")
+  payment_status         String                  @default("unpaid")
+  payment_method         String?
+  shipping_address       Json?
+  billing_address        Json?
+  created_at             DateTime                @default(now())
+  updated_at             DateTime?               @updatedAt
 
   // Relations
   user               users                @relation(fields: [user_id], references: [id])
@@ -536,44 +549,45 @@ model orders {
   returns            returns[]
   shipping_addresses shipping_addresses[]
 
+  @@unique([user_id, checkout_key])
+  @@index([status, reservation_expires_at])
   @@index([user_id, status])
   @@index([created_at])
   @@index([coupon_id])
 }
 
 model order_items {
-  id         Int       @id @default(autoincrement())
-  order_id   Int       @map("order_id")
-  product_id Int?      @map("product_id") // Nullable if the line is a service
-  service_id Int?      @map("service_id") // Nullable if the line is a product
-  variant_id Int?      @map("variant_id") // Nullable if no product variant exists
-  vendor_id  Int       @map("vendor_id")
-  quantity   Int
-  price      Decimal   @db.Decimal(10, 2)
-  subtotal   Decimal   @db.Decimal(10, 2)
-  created_at DateTime  @default(now()) @map("created_at")
-  updated_at DateTime? @updatedAt @map("updated_at")
+  stock_reserved Boolean   @default(false)
+  product_name   String?
+  id             Int       @id @default(autoincrement())
+  order_id       Int       @map("order_id")
+  product_id     Int       @map("product_id")
+  variant_id     Int?      @map("variant_id") // Nullable if no product variant exists
+  vendor_id      Int       @map("vendor_id")
+  quantity       Int
+  price          Decimal   @db.Decimal(10, 2)
+  subtotal       Decimal   @db.Decimal(10, 2)
+  created_at     DateTime  @default(now()) @map("created_at")
+  updated_at     DateTime? @updatedAt @map("updated_at")
 
   // 🌟 Cleaned, Compilable Relations
-  order            orders             @relation(fields: [order_id], references: [id], onDelete: Cascade)
-  product          products?          @relation(fields: [product_id], references: [id]) // Made optional
-  service          services?          @relation(fields: [service_id], references: [id]) // Corrected single mapping
-  variant          product_variants?  @relation(fields: [variant_id], references: [id])
-  vendor           vendors            @relation(fields: [vendor_id], references: [id])
-  service_bookings service_bookings[]
+  order   orders            @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  product products          @relation(fields: [product_id], references: [id])
+  variant product_variants? @relation(fields: [variant_id], references: [id])
+  vendor  vendors           @relation(fields: [vendor_id], references: [id])
 
   return_items return_items[]
 
   // Performance Compound Indexes
   @@index([order_id])
   @@index([product_id])
-  @@index([service_id])
   @@index([variant_id])
   @@index([vendor_id])
   @@map("order_items")
 }
 
 model shipping_addresses {
+  country_id Int?
   id         Int       @id @default(autoincrement())
   order_id   Int
   user_id    Int
@@ -598,42 +612,50 @@ model shipping_addresses {
 }
 
 model payments {
-  id          Int       @id @default(autoincrement())
-  order_id    Int?
-  user_id     Int
-  vendor_id   Int?
-  gateway     String // paystack, stripe, etc
-  gateway_ref String    @unique
-  amount      Decimal   @db.Decimal(10, 2)
-  currency_id Int
-  status      String    @default("pending") // pending, completed, failed
-  meta        String? // JSON metadata
-  created_at  DateTime  @default(now())
-  updated_at  DateTime? @updatedAt
+  events             payment_events[]
+  provider_ref       String?          @unique
+  checkout_data      String?
+  initializing_until DateTime?
+  paid_at            DateTime?
+  id                 Int              @id @default(autoincrement())
+  order_id           Int?
+  booking_id         Int?             @unique
+  user_id            Int
+  vendor_id          Int?
+  gateway            String // paystack, stripe, etc
+  gateway_ref        String           @unique
+  amount             Decimal          @db.Decimal(10, 2)
+  currency_id        Int
+  status             String           @default("pending") // pending, completed, failed
+  meta               String? // JSON metadata
+  created_at         DateTime         @default(now())
+  updated_at         DateTime?        @updatedAt
 
   // Relations
-  order  orders?  @relation(fields: [order_id], references: [id])
-  user   users    @relation(fields: [user_id], references: [id])
-  vendor vendors? @relation(fields: [vendor_id], references: [id])
+  order   orders?           @relation(fields: [order_id], references: [id])
+  booking service_bookings? @relation(fields: [booking_id], references: [id])
+  user    users             @relation(fields: [user_id], references: [id])
+  vendor  vendors?          @relation(fields: [vendor_id], references: [id])
 }
 
 model coupons {
-  id           Int       @id @default(autoincrement())
+  usage        coupon_usage[]
+  id           Int            @id @default(autoincrement())
   vendor_id    Int
   product_id   Int?
   service_id   Int?
   code         String
   type         String // percentage, fixed_amount
-  value        Decimal   @db.Decimal(10, 2)
-  max_discount Decimal?  @db.Decimal(10, 2)
-  min_order    Decimal   @default(0) @db.Decimal(10, 2)
+  value        Decimal        @db.Decimal(10, 2)
+  max_discount Decimal?       @db.Decimal(10, 2)
+  min_order    Decimal        @default(0) @db.Decimal(10, 2)
   usage_limit  Int?
-  usage_count  Int       @default(0)
-  status       String    @default("active")
+  usage_count  Int            @default(0)
+  status       String         @default("active")
   expires_at   DateTime?
   description  String?
-  created_at   DateTime  @default(now())
-  updated_at   DateTime? @updatedAt
+  created_at   DateTime       @default(now())
+  updated_at   DateTime?      @updatedAt
 
   // Relations
   vendor  vendors   @relation(fields: [vendor_id], references: [id])
@@ -847,6 +869,7 @@ model countries {
 }
 
 model currencies {
+  orders     orders[]
   id         Int       @id @default(autoincrement())
   code       String    @unique
   name       String
@@ -859,6 +882,7 @@ model currencies {
   countries countries[]
   cartItems cart_items[]
   services  services[]
+  bookings  service_bookings[]
 }
 
 model services {
@@ -876,7 +900,6 @@ model services {
 
   // Relations
   vendor                    vendors            @relation(fields: [vendor_id], references: [id], onDelete: Cascade)
-  orderItems                order_items[]
   bookings                  service_bookings[]
   reviews                   reviews[]
   currency                  currencies         @relation(fields: [currency_id], references: [id], onDelete: Cascade)
@@ -911,17 +934,89 @@ model services {
 }
 
 model service_bookings {
-  id               Int      @id @default(autoincrement())
-  order_item_id    Int      @unique @map("order_item_id")
-  service_id       Int      @map("service_id")
-  scheduled_for    DateTime @map("scheduled_for")
-  booking_status   String   @default("pending") @map("booking_status") // pending, confirmed, active, completed, cancelled
-  additional_notes String?  @map("additional_notes")
+  vendor_id                 Int
+  currency_id               Int
+  service_name              String
+  total                     Decimal   @db.Decimal(10, 2)
+  ends_at                   DateTime  @db.Timestamptz(3)
+  buffer_mins               Int       @default(0)
+  location_type             String
+  location                  String?
+  cancellation_window_hours Int       @default(24)
+  cancellation_fee_percent  Float     @default(0)
+  payment_status            String    @default("unpaid")
+  payment_method            String?
+  reservation_expires_at    DateTime? @db.Timestamptz(3)
+  checkout_key              String?
+  checkout_hash             String?
+  cancellation_reason       String?
+  refund_due                Decimal   @default(0) @db.Decimal(10, 2)
+  created_at                DateTime  @default(now()) @db.Timestamptz(3)
+  updated_at                DateTime? @updatedAt @db.Timestamptz(3)
+  id                        Int       @id @default(autoincrement())
+  user_id                   Int       @map("user_id")
+  service_id                Int       @map("service_id")
+  scheduled_for             DateTime  @map("scheduled_for") @db.Timestamptz(3)
+  booking_status            String    @default("pending") @map("booking_status") // pending, confirmed, active, completed, cancelled, expired, payment_review
+  additional_notes          String?   @map("additional_notes")
 
   // Relations
-  service   services    @relation(fields: [service_id], references: [id]) // Linked safely here
-  orderItem order_items @relation(fields: [order_item_id], references: [id], onDelete: Cascade)
+  service  services   @relation(fields: [service_id], references: [id]) // Linked safely here
+  user     users      @relation(fields: [user_id], references: [id])
+  vendor   vendors    @relation(fields: [vendor_id], references: [id])
+  currency currencies @relation(fields: [currency_id], references: [id])
+  payment  payments?
 
+  @@unique([user_id, checkout_key])
+  @@index([vendor_id, booking_status])
+  @@index([service_id, scheduled_for, ends_at])
+  @@index([user_id, booking_status])
   @@index([service_id, booking_status])
   @@map("service_bookings")
+}
+
+model coupon_usage {
+  coupon    coupons @relation(fields: [coupon_id], references: [id])
+  user      users   @relation(fields: [user_id], references: [id])
+  order     orders  @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  id        Int     @id @default(autoincrement())
+  coupon_id Int
+  user_id   Int
+  order_id  Int     @unique
+
+  @@unique([coupon_id, user_id])
+}
+
+model order_status_history {
+  order           orders   @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  changed_by_user users?   @relation(fields: [changed_by], references: [id])
+  id              Int      @id @default(autoincrement())
+  order_id        Int
+  status          String
+  note            String?
+  changed_by      Int?
+  created_at      DateTime @default(now())
+
+  @@index([order_id, created_at])
+}
+
+model payment_events {
+  payment          payments @relation(fields: [payment_id], references: [id], onDelete: Cascade)
+  id               Int      @id @default(autoincrement())
+  payment_id       Int
+  gateway          String
+  gateway_event_id String
+  event_type       String
+  created_at       DateTime @default(now())
+
+  @@unique([gateway, gateway_event_id])
+}
+
+model checkout_notifications {
+  order        orders    @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  id           Int       @id @default(autoincrement())
+  order_id     Int       @unique
+  attempts     Int       @default(0)
+  available_at DateTime  @default(now())
+  delivered_at DateTime?
 }

@@ -98,7 +98,7 @@ export const verifyEmail = async (req, res) => {
 
         await redisClient.del(redisKey);
 
-        return respondWithSuccess(res, 200, 'Email verified successfully');
+        return res.redirect(`${frontendBase}/login?message=Email verified successfully`);
     } catch (error) {
         console.error('Error verifying email:', error);
         return respondWithError(res, 500, 'Internal server error', ERROR_CODES.INTERNAL_SERVER_ERROR);

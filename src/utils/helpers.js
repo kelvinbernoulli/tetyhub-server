@@ -170,7 +170,7 @@ export const buildRedisKey = (email, type) => {
 export const ROLES = ROLE_CONSTANTS;
 
 export const generateOrderReference = (orderId) => {
-    return `ORD-${orderId}-${Date.now()}`;
+    return `ORD${orderId}${Date.now()}`;
 };
 
 export const frontendBase = process.env.NODE_ENV === 'production' ? process.env.FRONTEND_URL : process.env.FRONTEND_DEV_URL;
