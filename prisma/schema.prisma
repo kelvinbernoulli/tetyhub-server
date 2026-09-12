@@ -510,41 +510,41 @@ model wishlist_items {
 // ===============================================
 
 model orders {
-  id                     Int                     @id @default(autoincrement())
-  currency_id            Int
-  user_id                Int
-  order_number           String                  @unique
-  subtotal               Decimal                 @db.Decimal(10, 2)
-  shipping_fee           Decimal                 @default(0) @db.Decimal(10, 2)
-  tax                    Decimal                 @default(0) @db.Decimal(10, 2)
-  discount               Decimal                 @default(0) @db.Decimal(10, 2)
-  total                  Decimal                 @db.Decimal(10, 2)
-  note                   String?
-  coupon_id              Int?
-  coupon_code            String?
-  status                 String                  @default("pending")
-  payment_status         String                  @default("unpaid")
-  payment_method         String?
-  shipping_address       Json?
-  billing_address        Json?
-  checkout_key           String?
-  checkout_hash          String?
-  contact_email          String?
-  created_at             DateTime                @default(now())
-  updated_at             DateTime?               @updatedAt
+  id               Int       @id @default(autoincrement())
+  currency_id      Int
+  user_id          Int
+  order_number     String    @unique
+  subtotal         Decimal   @db.Decimal(10, 2)
+  shipping_fee     Decimal   @default(0) @db.Decimal(10, 2)
+  tax              Decimal   @default(0) @db.Decimal(10, 2)
+  discount         Decimal   @default(0) @db.Decimal(10, 2)
+  total            Decimal   @db.Decimal(10, 2)
+  note             String?
+  coupon_id        Int?
+  coupon_code      String?
+  status           String    @default("pending")
+  payment_status   String    @default("unpaid")
+  payment_method   String?
+  shipping_address Json?
+  billing_address  Json?
+  checkout_key     String?
+  checkout_hash    String?
+  contact_email    String?
+  created_at       DateTime  @default(now())
+  updated_at       DateTime? @updatedAt
 
   // Relations
-  user               users                @relation(fields: [user_id], references: [id])
-  coupon             coupons?             @relation(fields: [coupon_id], references: [id])
-  items              order_items[]
-  payments           payments[]
-  shipments          shipments[]
-  returns            returns[]
-  shipping_addresses shipping_addresses[]
-  currency               currencies?             @relation(fields: [currency_id], references: [id])
-  coupon_usage           coupon_usage?
-  status_history         order_status_history[]
-  checkout_notification  checkout_notifications?
+  user                  users                   @relation(fields: [user_id], references: [id])
+  coupon                coupons?                @relation(fields: [coupon_id], references: [id])
+  items                 order_items[]
+  payments              payments[]
+  shipments             shipments[]
+  returns               returns[]
+  shipping_addresses    shipping_addresses[]
+  currency              currencies?             @relation(fields: [currency_id], references: [id])
+  coupon_usage          coupon_usage?
+  status_history        order_status_history[]
+  checkout_notification checkout_notifications?
 
   @@unique([user_id, checkout_key])
   @@index([user_id, status])
@@ -567,11 +567,11 @@ model order_items {
   updated_at     DateTime? @updatedAt @map("updated_at")
 
   // 🌟 Cleaned, Compilable Relations
-  order            orders             @relation(fields: [order_id], references: [id], onDelete: Cascade)
-  product          products?          @relation(fields: [product_id], references: [id]) // Made optional
-  service          services?          @relation(fields: [service_id], references: [id]) // Corrected single mapping
-  variant          product_variants?  @relation(fields: [variant_id], references: [id])
-  vendor           vendors            @relation(fields: [vendor_id], references: [id])
+  order        orders            @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  product      products?         @relation(fields: [product_id], references: [id]) // Made optional
+  service      services?         @relation(fields: [service_id], references: [id]) // Corrected single mapping
+  variant      product_variants? @relation(fields: [variant_id], references: [id])
+  vendor       vendors           @relation(fields: [vendor_id], references: [id])
   return_items return_items[]
 
   // Performance Compound Indexes
@@ -936,7 +936,7 @@ model service_bookings {
   additional_notes String?  @map("additional_notes")
 
   // Relations
-  service   services    @relation(fields: [service_id], references: [id]) // Linked safely here
+  service services @relation(fields: [service_id], references: [id]) // Linked safely here
 
   @@index([service_id, booking_status])
   @@map("service_bookings")
