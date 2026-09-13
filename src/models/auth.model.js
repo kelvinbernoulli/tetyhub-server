@@ -34,7 +34,7 @@ export class Auth {
 
         // Match buildRedisKey format
         const redisKey = buildRedisKey(user.email, 'email_verification');
-        await redisClient.set(redisKey, code.toString(), { EX: 600 }); // 10 minutes expiration
+        await redisClient.set(redisKey, code.toString(), { EX: 30 * 60 }); // 30 minutes expiration
 
         const link = new URL('/verify-email', frontendBase);
         link.searchParams.set('token', encryptedCode);

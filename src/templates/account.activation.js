@@ -22,14 +22,18 @@ export const emailVerification = (user, verificationLink) => {
                 <hr style="margin: 30px 0; border: none; border-top: 1px solid #eee;" />
 
                 <p style="text-align: center; font-size: 14px; color: #666;">
-                Use the verification link below:
+                    Use the verification link below:
                 </p>
-                <a href="${verificationLink}" style="display: inline-block; margin: 20px auto; padding: 12px 25px; background-color: #007BFF; color: #fff; text-decoration: none; border-radius: 5px;">
-                Verify My Account
-                </a>
+
+                <div style="text-align: center;">
+                    <a href="${verificationLink}"
+                        style="display: inline-block; margin: 20px 0; padding: 12px 25px; background-color: #007BFF; color: #fff; text-decoration: none; border-radius: 5px;">
+                        Verify My Account
+                    </a>
+                </div>
 
                 <p style="text-align: center; font-size: 13px; color: #888;">
-                This link expires in <strong>10 minutes</strong>. Do not share it with anyone.
+                This link expires in <strong>30 minutes</strong>. Do not share it with anyone.
                 </p>
 
                 <p style="text-align: center; font-size: 13px; color: #999; margin-top: 20px;">

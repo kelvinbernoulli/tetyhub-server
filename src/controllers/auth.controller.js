@@ -77,7 +77,7 @@ export const verifyEmail = async (req, res) => {
 
         const stored = await redisClient.get(redisKey);
 
-        if (!stored) {
+        if (stored === null) {
             return respondWithError(res, 400, 'Verification link expired', ERROR_CODES.OTP_EXPIRED);
         }
 
