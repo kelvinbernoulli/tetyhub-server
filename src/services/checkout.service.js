@@ -150,6 +150,7 @@ export async function quote(client, userId, data = {}, lock = false) {
 }
 
 export async function processCheckout(user, data) {
+    console.log('Processing checkout for user:', user.id, 'with data:', data);
     // A deterministic payload hash catches accidental reuse of a key for another request.
     const requestHash = createHash('sha256')
         .update(
@@ -177,7 +178,9 @@ export async function processCheckout(user, data) {
             return existing.rows[0];
         }
         const preview = await quote(client, user.id, data, true);
+        // console.log("preview:", preview)
         assertGatewayCurrency(data.gateway, preview.currency);
+
         if (
             data.expected_currency !== preview.currency ||
             minorUnits(data.expected_total) !== minorUnits(preview.total)
@@ -189,8 +192,8 @@ export async function processCheckout(user, data) {
         const { rows } = await client.query(
             `INSERT INTO orders
             (user_id, order_number, subtotal, shipping_fee, discount, total, payment_method, note, currency_id,
-             checkout_key, checkout_hash, contact_email, reservation_expires_at, coupon_id, coupon_code)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW() + INTERVAL '30 minutes',$13,$14) RETURNING *`,
+             checkout_key, checkout_hash, contact_email, coupon_id, coupon_code)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
             [
                 user.id,
                 `ORD-${randomUUID()}`,
@@ -211,8 +214,8 @@ export async function processCheckout(user, data) {
         const order = rows[0];
         for (const item of preview.items) {
             await client.query(
-                `INSERT INTO order_items (order_id,vendor_id,product_id,variant_id,quantity,price,subtotal,stock_reserved,product_name)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+                `INSERT INTO order_items (order_id,vendor_id,product_id,variant_id,quantity,price,subtotal,stock_reserved)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
                 [
                     order.id,
                     item.vendor_id,
@@ -222,7 +225,6 @@ export async function processCheckout(user, data) {
                     item.price,
                     item.subtotal,
                     item.track_inventory,
-                    item.product_name,
                 ]
             );
             if (item.track_inventory) {
@@ -274,7 +276,7 @@ export async function processCheckout(user, data) {
         );
         if (minorUnits(order.total) === 0) {
             await client.query(
-                "UPDATE orders SET payment_status = 'paid', status = 'processing', reservation_expires_at = NULL WHERE id = $1",
+                "UPDATE orders SET payment_status = 'paid', status = 'processing' WHERE id = $1",
                 [order.id]
             );
             order.payment_status = 'paid';
@@ -284,21 +286,21 @@ export async function processCheckout(user, data) {
                 [order.id]
             );
         }
-        return order;
     });
-    if (order.payment_status === 'paid')
-        return {
-            order_id: order.id,
-            total: order.total,
-            payment_status: 'paid',
-            status: order.status,
-        };
+    // if (order.payment_status === 'paid')
+    //     return {
+    //         order_id: order.id,
+    //         total: order.total,
+    //         payment_status: 'paid',
+    //         status: order.status,
+    //     };
     try {
         const payment = await Payment.initiatePayment(
             user.id,
             order.id,
             order.payment_method
         );
+        console.log('Payment initiated:', payment);
         return {
             order_id: order.id,
             total: order.total,

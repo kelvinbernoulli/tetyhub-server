@@ -7,6 +7,8 @@ import {
 } from '#schemas/cart.schema.js';
 import ERROR_CODES from '#utils/error.codes.js';
 import { respondWithError, respondWithSuccess } from '#utils/response.js';
+import { randomUUID } from 'crypto';
+
 
 export const addToCart = async (req, res) => {
     try {
@@ -261,11 +263,14 @@ export const processCheckout = async (req, res) => {
         const { session, body } = req;
         const user = session?.user;
 
+        const idempotencyKey = randomUUID();
+
+
         const { error, value } = checkoutSchema.validate(
             {
                 ...body,
-                idempotency_key:
-                    req.get('Idempotency-Key') || body.idempotency_key,
+                idempotency_key: idempotencyKey,
+                    // req.get('Idempotency-Key') || body.idempotency_key,
             },
             { abortEarly: false, stripUnknown: true }
         );
@@ -277,7 +282,7 @@ export const processCheckout = async (req, res) => {
                 ERROR_CODES.VALIDATION_ERROR
             );
         }
-
+        console.log('Validated checkout data:', value);
         const result = await Cart.processCheckout(user, value);
         if (result?.error) {
             return respondWithError(

@@ -48,6 +48,8 @@ const validateState = (creating) => (value, helpers) => {
 export const createServiceSchema = Joi.object(fields)
     .keys({
         category_id: identifier.required(),
+        subcategory_id: identifier.optional(),
+        childcategory_id: identifier.optional(),
         name: fields.name.required(),
         description: Joi.string().trim().min(10).max(2000).required(),
         base_price: fields.base_price.required(),

@@ -35,22 +35,16 @@ export const upsertCartSchema = Joi.object({
         .integer()
         .min(1)
         .max(100)
+        .default(1)
         .required()
         .label('Quantity'),
 });
 
 export const checkoutSchema = Joi.object({
-    expected_currency: Joi.string()
-        .valid('NGN', 'USD', 'EUR', 'GBP')
-        .required(),
-    expected_total: Joi.number()
-        .min(0)
-        .max(99999999.99)
-        .precision(2)
-        .strict()
-        .required(),
-    gateway: Joi.string().valid('paystack', 'stripe').required(),
-    idempotency_key: Joi.string().guid({ version: 'uuidv4' }).required(),
+    expected_total: Joi.number().precision(2).positive().required().label('Total'),
+    expected_currency: Joi.string().length(3).uppercase().default('NGN').required().label('Currency'),
+    gateway: Joi.string().valid('paystack', 'stripe').default('paystack').required(),
+    // idempotency_key: Joi.string().guid({ version: 'uuidv4' }).required(),
     firstname: Joi.string().trim().max(100).required().label('First Name'),
     lastname: Joi.string().trim().max(100).required().label('Last Name'),
     email: Joi.string().trim().max(255).email().required().label('Email'),
