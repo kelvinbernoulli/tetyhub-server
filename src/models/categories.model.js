@@ -2,20 +2,21 @@ import pool from '#services/pg_pool.js';
 
 export class Category {
 
-    static async create({ name, description, image }) {
+    static async create(value) {
+        const { name, description, image, type } = value;
         const slug = name.toLowerCase().replace(/\s+/g, '-');
         const result = await pool.query(`
             INSERT INTO categories
-                (name, slug, description, image, status)
-            VALUES ($1, $2, $3, $4, $5)
+                (name, slug, description, type, image, status)
+            VALUES ($1, $2, $3, $4, $5, $6)
             RETURNING *`,
-            [name, slug, description ?? null, image ?? null, true]
+            [name, slug, description ?? null, type ?? null, image ?? null, true]
         );
         return result;
     }
 
     static async update(categoryId, value) {
-        const allowed = ['name', 'description', 'image', 'status'];
+        const allowed = ['name', 'description', 'image', 'status', 'type'];
         const fields = [];
         const values = [];
 

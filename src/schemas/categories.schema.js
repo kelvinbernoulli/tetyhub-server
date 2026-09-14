@@ -6,13 +6,15 @@ export const createCategorySchema = Joi.object({
     name: Joi.string().trim().min(2).max(100).required().label('Category Name'),
     description: Joi.string().trim().max(500).optional().label('Description'),
     image: Joi.string().pattern(base64ImagePattern).optional().label('Category Image'),
+    type: Joi.string().valid('product', 'service', 'both').required().label('Category Type')
 });
 
 export const updateCategorySchema = Joi.object({
     name: Joi.string().trim().min(2).max(100).label('Category Name'),
     description: Joi.string().trim().max(500).allow('', null).label('Description'),
-    image: Joi.string().pattern(base64ImagePattern).allow('', null).label('Category Image'),
-    status: Joi.boolean().label('Status'),
+    image: Joi.string().pattern(base64ImagePattern).optional().label('Category Image'),
+    type: Joi.string().valid('product', 'service', 'both').optional().label('Category Type'),
+    status: Joi.boolean().valid(true, false).optional().label('Status'),
 }).min(1);
 
 export default {

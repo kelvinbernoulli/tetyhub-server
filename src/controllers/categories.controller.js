@@ -13,7 +13,7 @@ export const createCategory = async (req, res) => {
 
         const { error, value } = createCategorySchema.validate(body, {abortEarly: false, stripUnknown: true});
         if (error) {
-            return respondWithError(res, 400, error.details[0].message, ERROR_CODES.VALIDATION_ERROR);
+            return respondWithError(res, 400, error.details.map((d) => d.message).join(','), ERROR_CODES.VALIDATION_ERROR);
         }
 
         const { name, image, description } = value;
@@ -28,8 +28,9 @@ export const createCategory = async (req, res) => {
             const filename = `images/category-images/${name}.${getBase64Extension(image)}`;
             upload = await S3upload(image, filename);
         }
+        value.image = upload ? upload.url : null;
 
-        const result = await Category.create({ name, description, image: upload.url });
+        const result = await Category.create(value);
         if (result.rowCount === 0) {
             return respondWithError(res, 400, 'Failed to create category', ERROR_CODES.RESOURCE_CREATE_FAILED);
         }
