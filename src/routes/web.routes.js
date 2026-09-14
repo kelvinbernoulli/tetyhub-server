@@ -22,6 +22,7 @@ import pagination from '#middlewares/pagination.middleware.js';
 import { Router } from 'express';
 import { authenticated, isCustomer } from '#middlewares/auth.middleware.js';
 import * as PaymentController from '#controllers/payment.controller.js';
+import * as ServicesController from '#controllers/services.controller.js';
 const router = Router();
 const checkoutLimit = rateLimit({
     windowMs: 60000,
@@ -178,9 +179,12 @@ router.post(
     WishlistController.moveToCart
 );
 
+router.get('/services', ServicesController.fetchPublicServices);
+router.get('/service/view/:id', ServicesController.viewPublicService);
+
 // Service bookings are independent of product orders.
 router.get('/services/:serviceId/availability', BookingController.availability);
-router.post('/bookings', authenticated, isCustomer, requireCsrfProtection, checkoutLimit, BookingController.create);
+router.post('/service/book', authenticated, isCustomer, requireCsrfProtection, checkoutLimit, BookingController.create);
 router.get('/bookings', authenticated, isCustomer, BookingController.list);
 router.get('/bookings/:bookingId', authenticated, isCustomer, BookingController.view);
 router.patch('/bookings/:bookingId/cancel', authenticated, isCustomer, requireCsrfProtection, BookingController.cancel);

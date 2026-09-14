@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import pool from '#services/pg_pool.js';
 import {
     CheckoutError,
@@ -69,6 +69,8 @@ export default class Booking {
     }
 
     static async create(userId, data) {
+        const idempotencyKey = randomUUID();
+        data.idempotency_key = idempotencyKey;
         const payload = {
             ...data,
             scheduled_for: new Date(data.scheduled_for).toISOString(),

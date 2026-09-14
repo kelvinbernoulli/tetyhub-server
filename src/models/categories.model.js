@@ -15,15 +15,30 @@ export class Category {
         return result;
     }
 
-    static async update(categoryId, value) {
-        const allowed = ['name', 'description', 'image', 'status', 'type'];
+    static async update(categoryId, value = {}) {
+        const id = Number(categoryId);
+        if (!Number.isInteger(id) || id <= 0) {
+            throw new Error('A valid category ID is required');
+        }
+
+        const allowed = ['name', 'slug', 'description', 'image', 'status', 'type'];
         const fields = [];
         const values = [];
 
+        const updateData = { ...value };
+
+        if (updateData.name && !updateData.slug) {
+            updateData.slug = updateData.name
+                .toLowerCase()
+                .trim()
+                .replace(/[^a-z0-9]+/g, '-')
+                .replace(/^-+|-+$/g, '');
+        }
+
         for (const key of allowed) {
-            if (value[key] !== undefined) {
+            if (updateData[key] !== undefined) {
                 fields.push(`${key} = $${fields.length + 1}`);
-                values.push(value[key]);
+                values.push(updateData[key]);
             }
         }
 
@@ -31,18 +46,24 @@ export class Category {
             throw new Error('No fields to update');
         }
 
-        // categoryId and vendorId appended after dynamic fields
         const idIdx = fields.length + 1;
 
-        const { rows } = await pool.query(`
-            UPDATE categories
-            SET ${fields.join(', ')}, updated_at = NOW()
-            WHERE id = $${idIdx}
-            RETURNING *`,
-            [...values, categoryId]
-        );
+        try {
+            const { rows } = await pool.query(
+                `
+                    UPDATE categories
+                    SET ${fields.join(', ')}, updated_at = NOW()
+                    WHERE id = $${idIdx}
+                    RETURNING *
+                `,
+                [...values, id]
+            );
 
-        return rows[0] ?? null; // null = not found or already deleted
+            return rows[0] ?? null;
+        } catch (error) {
+            console.error(`Error updating category:`, error);
+            throw error;
+        }
     }
 
     static async fetch({ limit = 20, offset = 0 } = {}) {

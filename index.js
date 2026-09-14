@@ -30,7 +30,7 @@ const __dirname = dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 5000;
 const APP_VERSION = 'v1';
-const REQUEST_SIZE_LIMIT = `${process.env.REQUEST_SIZE_LIMIT || 10}mb`;
+const REQUEST_SIZE_LIMIT = `${process.env.REQUEST_SIZE_LIMIT || 20}mb`;
 
 // Security
 app.use(helmet());

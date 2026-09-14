@@ -26,32 +26,32 @@ const owner = (req, vendor = false) => {
 const id = (req) => validate(bookingIdSchema, req.params.bookingId);
 const endpoint =
     (work, message, status = 200) =>
-    async (req, res) => {
-        try {
-            const result = await work(req);
-            if (result == null)
-                throw new CheckoutError('Booking not found', 404);
-            return respondWithSuccess(res, status, message, result);
-        } catch (error) {
-            const code = error instanceof CheckoutError ? error.code : 500;
-            if (code >= 500)
-                console.error('Booking request failed:', error.message);
-            return respondWithError(
-                res,
-                code,
-                code < 500
-                    ? error.message
-                    : 'Booking request failed; retry shortly',
-                code === 404
-                    ? ERROR_CODES.RESOURCE_NOT_FOUND
-                    : code === 409
-                      ? ERROR_CODES.RESOURCE_CONFLICT
-                      : code >= 500
-                        ? ERROR_CODES.INTERNAL_SERVER_ERROR
-                        : ERROR_CODES.VALIDATION_ERROR
-            );
-        }
-    };
+        async (req, res) => {
+            try {
+                const result = await work(req);
+                if (result == null)
+                    throw new CheckoutError('Booking not found', 404);
+                return respondWithSuccess(res, status, message, result);
+            } catch (error) {
+                const code = error instanceof CheckoutError ? error.code : 500;
+                if (code >= 500)
+                    console.error('Booking request failed:', error.message);
+                return respondWithError(
+                    res,
+                    code,
+                    code < 500
+                        ? error.message
+                        : 'Booking request failed; retry shortly',
+                    code === 404
+                        ? ERROR_CODES.RESOURCE_NOT_FOUND
+                        : code === 409
+                            ? ERROR_CODES.RESOURCE_CONFLICT
+                            : code >= 500
+                                ? ERROR_CODES.INTERNAL_SERVER_ERROR
+                                : ERROR_CODES.VALIDATION_ERROR
+                );
+            }
+        };
 export const availability = endpoint(
     (req) =>
         Booking.availability(
@@ -64,7 +64,7 @@ export const create = endpoint(
     (req) =>
         Booking.create(owner(req), validate(createBookingSchema, req.body)),
     'Booking reserved; complete payment before expiry',
-    201
+    200
 );
 export const list = endpoint(
     (req) =>

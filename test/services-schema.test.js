@@ -12,6 +12,7 @@ const base = {
     category_id: 1,
     currency_id: 1,
     base_price: 10,
+    thumbnail: 'data:image/png;base64,aGVsbG8=',
 };
 test('service location fields agree on create and update', () => {
     for (const [input, expected] of [
@@ -93,4 +94,25 @@ test('query validation coerces types and rejects vendor overrides and inverted r
         { min_price: 20, max_price: 10 },
     ])
         assert.ok(search.validate(body).error);
+});
+
+test('service media validates required thumbnail, formats and size limits', () => {
+    const { thumbnail, ...withoutThumbnail } = base;
+    assert.ok(create.validate(withoutThumbnail).error);
+    for (const format of ['png', 'jpeg', 'jpg', 'webp']) {
+        assert.equal(
+            update.validate({
+                thumbnail: `data:image/${format};base64,aGVsbG8=`,
+            }).error,
+            undefined
+        );
+    }
+    for (const thumbnail of [
+        'https://example.com/image.png',
+        'data:image/pdf;base64,aGVsbG8=',
+        'data:image/png;base64,a===',
+        `data:image/png;base64,${Buffer.alloc(2 * 1024 * 1024 + 1).toString('base64')}`,
+    ])
+        assert.ok(update.validate({ thumbnail }).error);
+    assert.ok(update.validate({ images: Array(6).fill(thumbnail) }).error);
 });

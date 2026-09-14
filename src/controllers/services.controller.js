@@ -3,6 +3,7 @@ import {
     createServiceSchema,
     updateServiceSchema,
     serviceSearchSchema,
+    publicServiceSearchSchema,
     serviceIdSchema,
 } from '#schemas/services.schema.js';
 import { serviceError } from '#utils/service-state.js';
@@ -90,6 +91,17 @@ export const fetchServices = endpoint(
 export const viewService = endpoint(
     (req) =>
         Services.view(validate(serviceIdSchema, req.params.id), vendor(req)),
+    'Service retrieved successfully'
+);
+export const fetchPublicServices = endpoint(
+    (req) =>
+        Services.readPublic(
+            validate(publicServiceSearchSchema, req.query ?? {})
+        ),
+    'Services retrieved successfully'
+);
+export const viewPublicService = endpoint(
+    (req) => Services.viewPublic(validate(serviceIdSchema, req.params.id)),
     'Service retrieved successfully'
 );
 export const deleteService = endpoint(

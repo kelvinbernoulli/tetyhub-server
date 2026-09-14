@@ -15,14 +15,24 @@ export class Subcategory {
     }
 
     static async update(subcategoryId, data) {
-        const allowed = ['name', 'category_id', 'description', 'image', 'status'];
+        const allowed = ['name', 'slug', 'category_id', 'description', 'image', 'status'];
         const fields = [];
         const values = [];
 
+         const updateData = { ...data };
+
+        if (updateData.name && !updateData.slug) {
+            updateData.slug = updateData.name
+                .toLowerCase()
+                .trim()
+                .replace(/[^a-z0-9]+/g, '-')
+                .replace(/^-+|-+$/g, '');
+        }
+
         for (const key of allowed) {
-            if (data[key] !== undefined) {
+            if (updateData[key] !== undefined) {
                 fields.push(`${key} = $${fields.length + 1}`);
-                values.push(data[key]);
+                values.push(updateData[key]);
             }
         }
 

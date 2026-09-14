@@ -51,7 +51,7 @@ router.patch("/product/update/:id", canUpdate('products'), ProductController.upd
 router.delete("/service/delete/:id", canDelete('services'), ServicesController.deleteService);
 router.post("/service/create", canCreate('services'), ServicesController.createService);
 router.get("/services", canRead('services'), pagination, ServicesController.fetchServices);
-router.get("/service/:id", canRead('services'), ServicesController.viewService);
+router.get("/service/view/:id", canRead('services'), ServicesController.viewService);
 router.patch("/service/update/:id", canUpdate('services'), ServicesController.updateService);
 
 //bookings (service permissions govern service fulfillment)

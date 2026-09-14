@@ -13,17 +13,16 @@ const scheduled = Joi.string()
 export const createBookingSchema = Joi.object({
     service_id: bookingIdSchema,
     scheduled_for: scheduled,
-    gateway: Joi.string().valid('paystack', 'stripe').required(),
+    gateway: Joi.string().valid('paystack').required(),
     expected_currency: Joi.string()
-        .valid('NGN', 'USD', 'EUR', 'GBP')
+        .valid('NGN')
         .required(),
     expected_total: Joi.number()
         .positive()
         .max(99999999.99)
         .precision(2)
-        .strict()
         .required(),
-    idempotency_key: Joi.string().guid({ version: 'uuidv4' }).required(),
+    // idempotency_key: Joi.string().guid({ version: 'uuidv4' }).required(),
     location: Joi.string().trim().max(1000),
     additional_notes: Joi.string().trim().max(1000),
 })

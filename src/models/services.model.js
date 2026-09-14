@@ -2,6 +2,7 @@ import pool from '#services/pg_pool.js';
 import { randomUUID } from 'node:crypto';
 import slugify from 'slugify';
 import { normalizeServiceState, serviceError } from '#utils/service-state.js';
+import { S3upload, S3delete } from '#services/s3bucket.js';
 
 const FIELDS = [
     'category_id',
@@ -40,16 +41,43 @@ const requireVendor = (vendorId) => {
 };
 async function transaction(work) {
     const client = await pool.connect();
+    const uploaded = [];
     try {
         await client.query('BEGIN');
-        const result = await work(client);
+        const result = await work(client, uploaded);
         await client.query('COMMIT');
         return result;
     } catch (error) {
         await client.query('ROLLBACK').catch(() => {});
+        for (const key of uploaded) {
+            try {
+                const result = await Services.storage.delete(key);
+                if (result?.error)
+                    console.error('Service image cleanup failed:', key);
+            } catch {
+                console.error('Service image cleanup failed:', key);
+            }
+        }
         throw error;
     } finally {
         client.release();
+    }
+}
+async function uploadMedia(fields, vendorId, uploaded) {
+    const upload = async (image) => {
+        const key = `services/${vendorId}/${randomUUID()}`;
+        uploaded.push(key);
+        const result = await Services.storage.upload(image, key);
+        if (result?.error || !result?.url)
+            throw serviceError('Unable to upload service image', 502);
+        return result.url;
+    };
+    if (fields.thumbnail != null)
+        fields.thumbnail = await upload(fields.thumbnail);
+    if (fields.images !== undefined) {
+        const urls = [];
+        for (const image of fields.images) urls.push(await upload(image));
+        fields.images = urls;
     }
 }
 async function validateRelations(client, data) {
@@ -87,20 +115,40 @@ async function validateRelations(client, data) {
     );
     if (!currency.rows.length) throw serviceError('Invalid currency');
 }
-const SELECT = `SELECT s.*, v.store_name AS vendor_name, c.name AS category_name,
-    sc.name AS subcategory_name, cc.name AS childcategory_name
+const RELATED_FIELDS = `v.store_name AS vendor_name, c.name AS category_name,
+    sc.name AS subcategory_name, cc.name AS childcategory_name,
+    cur.code AS currency, cur.code AS currency_code, cur.name AS currency_name`;
+const SELECT = `SELECT s.*, ${RELATED_FIELDS}
     FROM services s LEFT JOIN vendors v ON v.id = s.vendor_id
+    LEFT JOIN currencies cur ON cur.id = s.currency_id
     LEFT JOIN categories c ON c.id = s.category_id
     LEFT JOIN subcategories sc ON sc.id = s.subcategory_id
     LEFT JOIN childcategories cc ON cc.id = s.childcategory_id`;
 
+const PUBLIC_FROM = `services s JOIN vendors v ON v.id = s.vendor_id
+    JOIN currencies cur ON cur.id = s.currency_id
+    LEFT JOIN categories c ON c.id = s.category_id
+    LEFT JOIN subcategories sc ON sc.id = s.subcategory_id
+    LEFT JOIN childcategories cc ON cc.id = s.childcategory_id`;
+const PUBLIC_SELECT = `SELECT s.id, s.vendor_id, s.slug,
+    ${FIELDS.map((field) => `s.${field}`).join(', ')}, s.created_at, s.updated_at,
+    ${RELATED_FIELDS} FROM ${PUBLIC_FROM}`;
+const PUBLIC_WHERE = [
+    "s.status = 'active'",
+    's.deleted_at IS NULL',
+    "v.status = 'active'",
+    'cur.status = true',
+];
+
 export class Services {
+    static storage = { upload: S3upload, delete: S3delete };
     static async create(vendorId, data) {
         requireVendor(vendorId);
-        return transaction(async (client) => {
+        return transaction(async (client, uploaded) => {
             const fields = normalizeServiceState(pick(data), {}, true);
             if (!fields.category_id) throw serviceError('Category is required');
             await validateRelations(client, fields);
+            await uploadMedia(fields, vendorId, uploaded);
             fields.vendor_id = vendorId;
             fields.slug = `${slugify(fields.name, { lower: true, strict: true })}-${randomUUID()}`;
             const keys = Object.keys(fields);
@@ -111,9 +159,10 @@ export class Services {
             return rows[0];
         });
     }
+
     static async update(id, vendorId, data) {
         requireVendor(vendorId);
-        return transaction(async (client) => {
+        return transaction(async (client, uploaded) => {
             const found = await client.query(
                 'SELECT * FROM services WHERE id = $1 AND vendor_id = $2 AND deleted_at IS NULL FOR UPDATE',
                 [id, vendorId]
@@ -125,6 +174,7 @@ export class Services {
             if (!keys.length)
                 throw serviceError('No valid fields provided', 400);
             await validateRelations(client, { ...existing, ...fields });
+            await uploadMedia(fields, vendorId, uploaded);
             const { rows } = await client.query(
                 `UPDATE services SET ${keys.map((key, i) => `${key} = $${i + 1}`).join(', ')}, updated_at = NOW()
                 WHERE id = $${keys.length + 1} AND vendor_id = $${keys.length + 2} AND deleted_at IS NULL RETURNING *`,
@@ -135,13 +185,40 @@ export class Services {
     }
     static async read(vendorId, filters = {}) {
         requireVendor(vendorId);
+        return this.#list(
+            filters,
+            ['s.vendor_id = $1', 's.deleted_at IS NULL'],
+            [vendorId]
+        );
+    }
+    static async readPublic(filters = {}) {
+        return this.#list(
+            filters,
+            [...PUBLIC_WHERE],
+            [],
+            PUBLIC_SELECT,
+            PUBLIC_FROM
+        );
+    }
+    static async viewPublic(id) {
+        const { rows } = await pool.query(
+            `${PUBLIC_SELECT} WHERE ${PUBLIC_WHERE.join(' AND ')} AND s.id = $1 LIMIT 1`,
+            [id]
+        );
+        return rows[0] ?? null;
+    }
+    static async #list(
+        filters,
+        where,
+        values,
+        select = SELECT,
+        from = 'services s'
+    ) {
         const limit = Math.min(
             50,
             Math.max(1, Math.trunc(Number(filters.limit) || 20))
         );
         const offset = Math.max(0, Math.trunc(Number(filters.offset) || 0));
-        const where = ['s.vendor_id = $1', 's.deleted_at IS NULL'];
-        const values = [vendorId];
         const bind = (clause, value) => {
             values.push(value);
             where.push(clause.replaceAll('?', `$${values.length}`));
@@ -179,11 +256,11 @@ export class Services {
         const clause = `WHERE ${where.join(' AND ')}`;
         const [result, count] = await Promise.all([
             pool.query(
-                `${SELECT} ${clause} ORDER BY s.${column} ${direction}, s.id DESC LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
+                `${select} ${clause} ORDER BY s.${column} ${direction}, s.id DESC LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
                 [...values, limit, offset]
             ),
             pool.query(
-                `SELECT COUNT(*)::int AS total FROM services s ${clause}`,
+                `SELECT COUNT(*)::int AS total FROM ${from} ${clause}`,
                 values
             ),
         ]);

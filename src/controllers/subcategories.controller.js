@@ -32,7 +32,9 @@ export const createSubcategory = async (req, res) => {
             upload = await S3upload(image, filename);
         }
 
-        const result = await Subcategory.create({ name, category_id, image: upload.url, description });
+        value.image = upload ? upload.url : null;
+
+        const result = await Subcategory.create(value);
         if (result.rowCount === 0) {
             return respondWithError(res, 400, 'Failed to create subcategory', ERROR_CODES.RESOURCE_CREATE_FAILED);
         }

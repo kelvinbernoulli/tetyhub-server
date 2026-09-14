@@ -150,7 +150,6 @@ export async function quote(client, userId, data = {}, lock = false) {
 }
 
 export async function processCheckout(user, data) {
-    console.log('Processing checkout for user:', user.id, 'with data:', data);
     // A deterministic payload hash catches accidental reuse of a key for another request.
     const requestHash = createHash('sha256')
         .update(

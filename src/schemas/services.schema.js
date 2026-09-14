@@ -1,11 +1,40 @@
 import Joi from 'joi';
 import { normalizeServiceState } from '#utils/service-state.js';
+
 const MAX_INT = 2147483647;
+const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
+
 const identifier = Joi.number().integer().positive().max(MAX_INT);
 const money = Joi.number().positive().precision(2).strict().max(99999999.99);
-const mediaUrl = Joi.string()
-    .uri({ scheme: ['https', 'http'] })
-    .max(2048);
+
+// Matches the pattern in your product schema: validate shape via regex,
+// then re-check the decoded byte length so oversized payloads are rejected
+// before they ever reach the DB/storage layer.
+const base64Image = Joi.string()
+    .max(4 * Math.ceil(MAX_IMAGE_BYTES / 3) + 32)
+    .custom((value, helpers) => {
+        const match =
+            /^data:image\/(png|jpeg|jpg|webp);base64,([A-Za-z0-9+/]+={0,2})$/.exec(
+                value
+            );
+        if (!match) return helpers.error('any.invalid');
+        const bytes = Buffer.from(match[2], 'base64');
+        if (
+            !bytes.length ||
+            bytes.length > MAX_IMAGE_BYTES ||
+            bytes.toString('base64') !== match[2]
+        ) {
+            return helpers.error('any.invalid');
+        }
+        return value;
+    })
+    .messages({
+        'string.pattern.base':
+            '{{#label}} must be a valid base64 image data URL',
+        'any.invalid':
+            '{{#label}} must be a valid PNG, JPEG or WebP base64 data URL, at most 2 MiB',
+    });
+
 const fields = {
     category_id: identifier,
     subcategory_id: identifier.allow(null),
@@ -33,18 +62,21 @@ const fields = {
         .strict()
         .min(0)
         .max(100),
-    images: Joi.array().items(mediaUrl).max(10).unique(),
-    thumbnail: mediaUrl.allow(null),
+    images: Joi.array().items(base64Image).max(5),
+    thumbnail: base64Image.allow(null),
     meta_title: Joi.string().trim().max(255).allow(null, ''),
     meta_description: Joi.string().trim().max(500).allow(null, ''),
 };
+
 const validateState = (creating) => (value, helpers) => {
     try {
-        return normalizeServiceState(value, {}, creating);
+        const normalized = normalizeServiceState(value, {}, creating);
+        return creating ? normalized : value;
     } catch (error) {
         return helpers.message({ custom: error.message });
     }
 };
+
 export const createServiceSchema = Joi.object(fields)
     .keys({
         category_id: identifier.required(),
@@ -54,6 +86,7 @@ export const createServiceSchema = Joi.object(fields)
         description: Joi.string().trim().min(10).max(2000).required(),
         base_price: fields.base_price.required(),
         currency_id: identifier.required(),
+        thumbnail: base64Image.required(), // required only at creation
         status: fields.status.default('active'),
         duration_mins: fields.duration_mins.default(60),
         buffer_mins: fields.buffer_mins.default(0),
@@ -73,16 +106,11 @@ export const updateServiceSchema = Joi.object(fields)
     .unknown(false)
     .required()
     .min(1)
-    .custom((value, helpers) => {
-        try {
-            normalizeServiceState(value);
-            return value;
-        } catch (error) {
-            return helpers.message({ custom: error.message });
-        }
-    })
+    .custom(validateState(false))
     .prefs({ abortEarly: false });
+
 export const serviceIdSchema = identifier.required();
+
 export const serviceSearchSchema = Joi.object({
     search: Joi.string().trim().max(255),
     category_id: identifier,
@@ -120,3 +148,8 @@ export const serviceSearchSchema = Joi.object({
         return value;
     })
     .prefs({ abortEarly: false });
+
+// Public browsing cannot request paused or deleted services.
+export const publicServiceSearchSchema = serviceSearchSchema.keys({
+    status: Joi.string().valid('active'),
+});

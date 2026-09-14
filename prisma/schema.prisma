@@ -94,6 +94,7 @@ model users {
   admin_assignments_created admins[]                 @relation("AdminCreatedBy")
   permission_grants_created admin_permissions[]      @relation("PermissionGrantedBy")
   admin_audit_logs          admin_audit_logs[]       @relation("AdminAuditActor")
+  service_bookings          service_bookings[]
 
   @@index([country_id])
 }
@@ -931,12 +932,14 @@ model services {
 model service_bookings {
   id               Int      @id @default(autoincrement())
   service_id       Int      @map("service_id")
+  user_id          Int      @map("user_id")
   scheduled_for    DateTime @map("scheduled_for")
   booking_status   String   @default("pending") @map("booking_status") // pending, confirmed, active, completed, cancelled
   additional_notes String?  @map("additional_notes")
 
   // Relations
   service services @relation(fields: [service_id], references: [id]) // Linked safely here
+  user    users    @relation(fields: [user_id], references: [id])
 
   @@index([service_id, booking_status])
   @@map("service_bookings")
