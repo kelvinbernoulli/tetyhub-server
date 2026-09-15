@@ -44,16 +44,16 @@ const validatePrices = (value, helpers) => {
 const variantSchema = Joi.object({
     sku: Joi.string().trim().max(100).allow(null),
     barcode: Joi.string().trim().max(100).allow(null),
-    price: Joi.number().precision(2).strict().min(0).max(MAX_PRICE).required(),
+    price: Joi.number().precision(2).min(0).max(MAX_PRICE).required(),
     compare_at_price: Joi.number()
         .precision(2)
-        .strict()
+        
         .min(0)
         .max(MAX_PRICE)
         .allow(null),
     cost_price: Joi.number()
         .precision(2)
-        .strict()
+        
         .min(0)
         .max(MAX_PRICE)
         .allow(null),
@@ -159,28 +159,28 @@ export const createProductSchema = Joi.object({
     // Pricing
     price: Joi.number()
         .precision(2)
-        .strict()
+        
         .min(0)
         .max(MAX_PRICE)
         .required()
         .label('Price'), // selling price
     compare_at_price: Joi.number()
         .precision(2)
-        .strict()
+        
         .min(0)
         .max(MAX_PRICE)
         .optional()
         .label('Compare At Price'), // original price before discount
     cost_price: Joi.number()
         .precision(2)
-        .strict()
+        
         .min(0)
         .max(MAX_PRICE)
         .optional()
         .label('Cost Price'), // vendor paid
     discount: Joi.number()
         .precision(2)
-        .strict()
+        
         .min(0)
         .max(100)
         .optional()
@@ -293,7 +293,7 @@ export const updateProductSchema = Joi.object({
 
     price: Joi.number()
         .precision(2)
-        .strict()
+        
         .min(0)
         .max(MAX_PRICE)
         .optional()
@@ -301,7 +301,7 @@ export const updateProductSchema = Joi.object({
 
     compare_at_price: Joi.number()
         .precision(2)
-        .strict()
+        
         .min(0)
         .max(MAX_PRICE)
         .allow(null)
@@ -310,7 +310,7 @@ export const updateProductSchema = Joi.object({
 
     cost_price: Joi.number()
         .precision(2)
-        .strict()
+        
         .min(0)
         .max(MAX_PRICE)
         .allow(null)
@@ -319,7 +319,7 @@ export const updateProductSchema = Joi.object({
 
     discount: Joi.number()
         .precision(2)
-        .strict()
+        
         .min(0)
         .max(100)
         .optional()
