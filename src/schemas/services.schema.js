@@ -5,7 +5,7 @@ const MAX_INT = 2147483647;
 const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
 
 const identifier = Joi.number().integer().positive().max(MAX_INT);
-const money = Joi.number().positive().precision(2).strict().max(99999999.99);
+const money = Joi.number().positive().precision(2).max(99999999.99);
 
 // Matches the pattern in your product schema: validate shape via regex,
 // then re-check the decoded byte length so oversized payloads are rejected
@@ -59,7 +59,7 @@ const fields = {
     cancellation_window_hours: Joi.number().integer().min(0).max(720),
     cancellation_fee_percent: Joi.number()
         .precision(2)
-        .strict()
+        
         .min(0)
         .max(100),
     images: Joi.array().items(base64Image).max(5),
