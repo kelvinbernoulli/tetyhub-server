@@ -59,7 +59,7 @@ export class Payment {
                 payment = (
                     await client.query(
                         `INSERT INTO payments (order_id,user_id,gateway,gateway_ref,amount,currency_id)
-                    VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+                        VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
                         [
                             order.id,
                             userId,

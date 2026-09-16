@@ -180,19 +180,17 @@ export async function processCheckout(user, data) {
         const preview = await quote(client, user.id, data, true);
         assertGatewayCurrency(data.gateway, preview.currency);
 
-        if (
-            data.expected_currency !== preview.currency ||
-            minorUnits(data.expected_total) !== minorUnits(preview.total)
-        )
-            throw new CheckoutError(
-                'Checkout total changed; refresh your checkout preview',
-                409
-            );
+        if (data.expected_currency !== preview.currency || minorUnits(data.expected_total) !== minorUnits(preview.total))
+        throw new CheckoutError(
+            'Checkout total changed; refresh your checkout preview',
+            409
+        );
+
         const { rows } = await client.query(
             `INSERT INTO orders
-            (user_id, order_number, subtotal, shipping_fee, discount, total, payment_method, note, currency_id,
-             checkout_key, checkout_hash, contact_email, coupon_id, coupon_code)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
+            (user_id, order_number, subtotal, shipping_fee, discount, total, payment_method, note, currency_id, checkout_key, checkout_hash, contact_email, coupon_id, coupon_code)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+            RETURNING *`,
             [
                 user.id,
                 `ORD-${randomUUID()}`,
@@ -210,6 +208,7 @@ export async function processCheckout(user, data) {
                 data.coupon_code ?? null,
             ]
         );
+        
         const order = rows[0];
         for (const item of preview.items) {
             await client.query(
@@ -273,6 +272,7 @@ export async function processCheckout(user, data) {
             "INSERT INTO order_status_history (order_id,status,note,changed_by) VALUES ($1,'pending','Checkout created',$2)",
             [order.id, user.id]
         );
+
         if (minorUnits(order.total) === 0) {
             await client.query(
                 "UPDATE orders SET payment_status = 'paid', status = 'processing' WHERE id = $1",

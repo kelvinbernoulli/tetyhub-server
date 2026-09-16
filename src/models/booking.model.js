@@ -136,7 +136,7 @@ export default class Booking {
                 `INSERT INTO service_bookings
                 (user_id,service_id,vendor_id,currency_id,service_name,total,scheduled_for,ends_at,buffer_mins,
                 location_type,location,cancellation_window_hours,cancellation_fee_percent,payment_method,
-                reservation_expires_at,checkout_key,checkout_hash,additional_notes)
+                reservation_expires_at,checkout_key,checkout_hash,note)
                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
                 [
                     userId,
@@ -156,7 +156,7 @@ export default class Booking {
                     expiry,
                     data.idempotency_key,
                     hash,
-                    data.additional_notes ?? null,
+                    data.note ?? null,
                 ]
             );
             return rows[0];

@@ -24,7 +24,7 @@ export const createBookingSchema = Joi.object({
         .required(),
     // idempotency_key: Joi.string().guid({ version: 'uuidv4' }).required(),
     location: Joi.string().trim().max(1000),
-    additional_notes: Joi.string().trim().max(1000),
+    note: Joi.string().trim().max(1000),
 })
     .required()
     .options({ allowUnknown: false, stripUnknown: false });

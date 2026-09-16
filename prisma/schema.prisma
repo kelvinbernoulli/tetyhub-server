@@ -164,6 +164,7 @@ model vendors {
   admins           admins[]
   admin_audit_logs admin_audit_logs[]
   services         services[]
+  service_bookings service_bookings[]
 
   @@index([country_id])
 }
@@ -931,16 +932,33 @@ model services {
 }
 
 model service_bookings {
-  id               Int      @id @default(autoincrement())
-  service_id       Int      @map("service_id")
-  user_id          Int      @map("user_id")
-  scheduled_for    DateTime @map("scheduled_for")
-  booking_status   String   @default("pending") @map("booking_status") // pending, confirmed, active, completed, cancelled
-  additional_notes String?  @map("additional_notes")
+  id                        Int       @id @default(autoincrement())
+  service_id                Int       @map("service_id")
+  vendor_id                 Int       @map("vendor_id")
+  user_id                   Int       @map("user_id")
+  currency_id               Int       @map("currency_id")
+  service_name              String
+  total                     Decimal?  @db.Decimal(10, 2)
+  payment_method            String
+  payment_status            String    @default("unpaid") // unpaid, paid, refunded
+  ends_at                   DateTime?
+  buffer_mins               Int       @default(0) @map("buffer_mins")
+  location_type             String
+  location                  String    @map("location")
+  checkout_key              String    @map("checkout_key")
+  checkout_hash             String    @map("checkout_hash")
+  scheduled_for             DateTime  @map("scheduled_for")
+  cancellation_window_hours Int       @default(24) @map("cancellation_window_hours")
+  cancellation_fee_percent  Float     @default(0) @map("cancellation_fee_percent")
+  reservation_expires_at    DateTime? @default(dbgenerated("(now() + interval '30 minutes')")) @map("reservation_expires_at")
+  created_at                DateTime  @default(now()) @map("created_at")
+  booking_status            String    @default("pending") @map("booking_status") // pending, confirmed, active, completed, cancelled
+  note                      String?   @map("note")
 
   // Relations
   service services @relation(fields: [service_id], references: [id]) // Linked safely here
   user    users    @relation(fields: [user_id], references: [id])
+  vendors vendors   @relation(fields: [vendor_id], references: [id])
 
   @@index([service_id, booking_status])
   @@map("service_bookings")
@@ -959,14 +977,15 @@ model coupon_usage {
 }
 
 model order_status_history {
-  order           orders   @relation(fields: [order_id], references: [id], onDelete: Cascade)
-  changed_by_user users?   @relation(fields: [changed_by], references: [id])
-  id              Int      @id @default(autoincrement())
-  order_id        Int
-  status          String
-  note            String?
-  changed_by      Int?
-  created_at      DateTime @default(now())
+  id         Int      @id @default(autoincrement())
+  order_id   Int
+  status     String
+  note       String?
+  changed_by Int?
+  created_at DateTime @default(now())
+
+  order           orders @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  changed_by_user users? @relation(fields: [changed_by], references: [id])
 
   @@index([order_id, created_at])
 }
@@ -984,10 +1003,11 @@ model payment_events {
 }
 
 model checkout_notifications {
-  order        orders    @relation(fields: [order_id], references: [id], onDelete: Cascade)
   id           Int       @id @default(autoincrement())
   order_id     Int       @unique
   attempts     Int       @default(0)
   available_at DateTime  @default(now())
   delivered_at DateTime?
+
+  order orders @relation(fields: [order_id], references: [id], onDelete: Cascade)
 }
