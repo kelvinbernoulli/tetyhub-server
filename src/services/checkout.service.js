@@ -27,7 +27,7 @@ export async function quote(client, userId, data = {}, lock = false) {
         LEFT JOIN currencies c ON c.id = p.currency_id
         LEFT JOIN product_variants pv ON pv.id = ci.variant_id
         WHERE ci.cart_id = $1 ORDER BY p.id, ci.id` +
-            (lock ? ' FOR UPDATE OF ci, p' : ''),
+        (lock ? ' FOR UPDATE OF ci, p' : ''),
         [carts[0].id]
     );
     if (!items.length) throw new CheckoutError('Cart is empty', 400);
@@ -88,7 +88,7 @@ export async function quote(client, userId, data = {}, lock = false) {
         const { rows } = await client.query(
             `SELECT * FROM coupons WHERE code = $1 AND vendor_id = ANY($2::int[])
             AND status = 'active' AND (expires_at IS NULL OR expires_at > NOW()) ORDER BY id` +
-                (lock ? ' FOR UPDATE' : ''),
+            (lock ? ' FOR UPDATE' : ''),
             [data.coupon_code, vendorIds]
         );
         if (rows.length !== 1)
@@ -160,6 +160,7 @@ export async function processCheckout(user, data) {
             )
         )
         .digest('hex');
+
     const order = await transaction(pool, async (client) => {
         await client.query('SELECT pg_advisory_xact_lock($1::bigint)', [
             user.id,
@@ -177,7 +178,6 @@ export async function processCheckout(user, data) {
             return existing.rows[0];
         }
         const preview = await quote(client, user.id, data, true);
-        // console.log("preview:", preview)
         assertGatewayCurrency(data.gateway, preview.currency);
 
         if (
@@ -285,21 +285,24 @@ export async function processCheckout(user, data) {
                 [order.id]
             );
         }
+        return order;
     });
-    // if (order.payment_status === 'paid')
-    //     return {
-    //         order_id: order.id,
-    //         total: order.total,
-    //         payment_status: 'paid',
-    //         status: order.status,
-    //     };
+    
+    if (order.payment_status === 'paid') {
+        return {
+            order_id: order.id,
+            total: order.total,
+            payment_status: 'paid',
+            status: order.status,
+        };
+    }
+
     try {
         const payment = await Payment.initiatePayment(
             user.id,
             order.id,
             order.payment_method
         );
-        console.log('Payment initiated:', payment);
         return {
             order_id: order.id,
             total: order.total,

@@ -511,28 +511,29 @@ model wishlist_items {
 // ===============================================
 
 model orders {
-  id               Int       @id @default(autoincrement())
-  currency_id      Int
-  user_id          Int
-  order_number     String    @unique
-  subtotal         Decimal   @db.Decimal(10, 2)
-  shipping_fee     Decimal   @default(0) @db.Decimal(10, 2)
-  tax              Decimal   @default(0) @db.Decimal(10, 2)
-  discount         Decimal   @default(0) @db.Decimal(10, 2)
-  total            Decimal   @db.Decimal(10, 2)
-  note             String?
-  coupon_id        Int?
-  coupon_code      String?
-  status           String    @default("pending")
-  payment_status   String    @default("unpaid")
-  payment_method   String?
-  shipping_address Json?
-  billing_address  Json?
-  checkout_key     String?
-  checkout_hash    String?
-  contact_email    String?
-  created_at       DateTime  @default(now())
-  updated_at       DateTime? @updatedAt
+  id                     Int       @id @default(autoincrement())
+  currency_id            Int
+  user_id                Int
+  order_number           String    @unique
+  subtotal               Decimal   @db.Decimal(10, 2)
+  shipping_fee           Decimal   @default(0) @db.Decimal(10, 2)
+  tax                    Decimal   @default(0) @db.Decimal(10, 2)
+  discount               Decimal   @default(0) @db.Decimal(10, 2)
+  total                  Decimal   @db.Decimal(10, 2)
+  note                   String?
+  coupon_id              Int?
+  coupon_code            String?
+  status                 String    @default("pending")
+  payment_status         String    @default("unpaid")
+  payment_method         String?
+  shipping_address       Json?
+  billing_address        Json?
+  checkout_key           String?
+  checkout_hash          String?
+  contact_email          String?
+  reservation_expires_at DateTime? @default(dbgenerated("(now() + interval '30 minutes')"))
+  created_at             DateTime  @default(now())
+  updated_at             DateTime? @updatedAt
 
   // Relations
   user                  users                   @relation(fields: [user_id], references: [id])
