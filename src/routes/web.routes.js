@@ -342,4 +342,6 @@ router.get(
     TransactionHistoryController.getTransactionById
 );
 
+router.get("/vendor/settings/:id", pagination, SettingsController.fetchSettings);
+
 export default router;

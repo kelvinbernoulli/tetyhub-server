@@ -98,6 +98,15 @@ export const fetchGeneralSettings = async (req, res) => {
     }
 }
 
+export const viewStoreFront = async (req, res) => {
+    try {
+        
+    } catch (error) {
+        console.error(error);
+        return respondWithError(res, 500, 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);
+    }
+}
+
 export default {
     upsertSettings,
     fetchSettings,

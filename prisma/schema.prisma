@@ -95,6 +95,7 @@ model users {
   permission_grants_created admin_permissions[]      @relation("PermissionGrantedBy")
   admin_audit_logs          admin_audit_logs[]       @relation("AdminAuditActor")
   service_bookings          service_bookings[]
+  vendorSettings            vendor_settings?
 
   @@index([country_id])
 }
@@ -121,37 +122,14 @@ model users_info {
 // ===============================================
 
 model vendors {
-  id                  Int       @id @default(autoincrement())
-  user_id             Int       @unique
-  store_name          String?
-  store_slug          String?   @unique
-  description         String?
-  logo                String?
-  banner              String?
-  phone_one           String?
-  phone_two           String?
-  facebook            String?
-  twitter             String?
-  instagram           String?
-  linkedIn            String?
-  snapchat            String?
-  whatsapp            String?
-  email               String?
-  website             String?
-  address             String?
-  city                String?
-  state               String?
-  postal_code         String?
-  country_id          Int?
-  verification_status String    @default("pending") // pending, verified, rejected
-  commission_rate     Float     @default(0)
-  status              String    @default("active") // active, inactive, suspended
-  created_at          DateTime  @default(now())
-  updated_at          DateTime? @updatedAt
+  id         Int       @id @default(autoincrement())
+  user_id    Int       @unique
+  verification_status  String    @default("pending") // pending, verified, rejected
+  status               String    @default("active") // active, inactive, suspended
+  created_at DateTime  @default(now())
+  updated_at DateTime? @updatedAt
 
-  // Relations
-  user             users              @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  country          countries?         @relation(fields: [country_id], references: [id])
+  users            users              @relation(fields: [user_id], references: [id], onDelete: Cascade)
   products         products[]
   order_items      order_items[]
   product_images   product_images[]
@@ -160,13 +138,11 @@ model vendors {
   coupons          coupons[]
   support_tickets  support_tickets[]
   returns          returns[]
-  vendor_settings  vendor_settings?
   admins           admins[]
   admin_audit_logs admin_audit_logs[]
   services         services[]
   service_bookings service_bookings[]
-
-  @@index([country_id])
+  vendorSettings   vendor_settings?
 }
 
 model admins {
@@ -187,11 +163,13 @@ model admins {
   updated_at            DateTime?   @updatedAt
 
   // Relations
-  user        users               @relation("AdminUser", fields: [user_id], references: [id], onDelete: Cascade)
-  vendor      vendors?            @relation(fields: [vendor_id], references: [id], onDelete: Cascade)
-  created_by  users?              @relation("AdminCreatedBy", fields: [created_by_user_id], references: [id], onDelete: SetNull)
-  permissions admin_permissions[]
-  audit_logs  admin_audit_logs[]
+  user              users               @relation("AdminUser", fields: [user_id], references: [id], onDelete: Cascade)
+  vendor            vendors?            @relation(fields: [vendor_id], references: [id], onDelete: Cascade)
+  created_by        users?              @relation("AdminCreatedBy", fields: [created_by_user_id], references: [id], onDelete: SetNull)
+  permissions       admin_permissions[]
+  audit_logs        admin_audit_logs[]
+  vendorSettings    vendor_settings?    @relation(fields: [vendor_settingsId], references: [id])
+  vendor_settingsId Int?
 
   @@index([scope, status])
   @@index([vendor_id, status])
@@ -248,9 +226,11 @@ model admin_audit_logs {
   user_agent      String?
   created_at      DateTime @default(now())
 
-  actor        users    @relation("AdminAuditActor", fields: [actor_user_id], references: [id], onDelete: Restrict)
-  target_admin admins?  @relation(fields: [target_admin_id], references: [id], onDelete: SetNull)
-  vendor       vendors? @relation(fields: [vendor_id], references: [id], onDelete: SetNull)
+  actor             users            @relation("AdminAuditActor", fields: [actor_user_id], references: [id], onDelete: Restrict)
+  target_admin      admins?          @relation(fields: [target_admin_id], references: [id], onDelete: SetNull)
+  vendor            vendors?         @relation(fields: [vendor_id], references: [id], onDelete: SetNull)
+  vendorSettings    vendor_settings? @relation(fields: [vendor_settingsId], references: [id])
+  vendor_settingsId Int?
 
   @@index([actor_user_id, created_at])
   @@index([target_admin_id, created_at])
@@ -352,20 +332,22 @@ model products {
   deleted_at          DateTime?
 
   // Relations
-  vendor         vendors              @relation(fields: [vendor_id], references: [id], onDelete: Cascade)
-  category       categories           @relation(fields: [category_id], references: [id])
-  subcategory    subcategories?       @relation(fields: [subcategory_id], references: [id])
-  childcategory  childcategories?     @relation(fields: [childcategory_id], references: [id])
-  currency       currencies           @relation(fields: [currency_id], references: [id])
-  images         product_images[]
-  variants       product_variants[]
-  attributes     product_attributes[]
-  options        product_options[]
-  cart_items     cart_items[]
-  order_items    order_items[]
-  reviews        reviews[]
-  wishlist_items wishlist_items[]
-  coupons        coupons[]
+  vendor            vendors              @relation(fields: [vendor_id], references: [id], onDelete: Cascade)
+  category          categories           @relation(fields: [category_id], references: [id])
+  subcategory       subcategories?       @relation(fields: [subcategory_id], references: [id])
+  childcategory     childcategories?     @relation(fields: [childcategory_id], references: [id])
+  currency          currencies           @relation(fields: [currency_id], references: [id])
+  images            product_images[]
+  variants          product_variants[]
+  attributes        product_attributes[]
+  options           product_options[]
+  cart_items        cart_items[]
+  order_items       order_items[]
+  reviews           reviews[]
+  wishlist_items    wishlist_items[]
+  coupons           coupons[]
+  vendorSettings    vendor_settings?     @relation(fields: [vendor_settingsId], references: [id])
+  vendor_settingsId Int?
 
   @@index([currency_id])
 }
@@ -382,8 +364,10 @@ model product_images {
   updated_at DateTime? @updatedAt
 
   // Relations
-  product products @relation(fields: [product_id], references: [id], onDelete: Cascade)
-  vendor  vendors  @relation(fields: [vendor_id], references: [id], onDelete: Cascade)
+  product           products         @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  vendor            vendors          @relation(fields: [vendor_id], references: [id], onDelete: Cascade)
+  vendorSettings    vendor_settings? @relation(fields: [vendor_settingsId], references: [id])
+  vendor_settingsId Int?
 }
 
 model product_variants {
@@ -406,11 +390,13 @@ model product_variants {
   updated_at          DateTime? @updatedAt
 
   // Relations
-  product       products                @relation(fields: [product_id], references: [id], onDelete: Cascade)
-  vendor        vendors                 @relation(fields: [vendor_id], references: [id], onDelete: Cascade)
-  cart_items    cart_items[]
-  order_items   order_items[]
-  option_values variant_option_values[]
+  product           products                @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  vendor            vendors                 @relation(fields: [vendor_id], references: [id], onDelete: Cascade)
+  cart_items        cart_items[]
+  order_items       order_items[]
+  option_values     variant_option_values[]
+  vendorSettings    vendor_settings?        @relation(fields: [vendor_settingsId], references: [id])
+  vendor_settingsId Int?
 }
 
 model product_attributes {
@@ -570,12 +556,14 @@ model order_items {
   updated_at     DateTime? @updatedAt @map("updated_at")
 
   // 🌟 Cleaned, Compilable Relations
-  order        orders            @relation(fields: [order_id], references: [id], onDelete: Cascade)
-  product      products?         @relation(fields: [product_id], references: [id]) // Made optional
-  service      services?         @relation(fields: [service_id], references: [id]) // Corrected single mapping
-  variant      product_variants? @relation(fields: [variant_id], references: [id])
-  vendor       vendors           @relation(fields: [vendor_id], references: [id])
-  return_items return_items[]
+  order             orders            @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  product           products?         @relation(fields: [product_id], references: [id]) // Made optional
+  service           services?         @relation(fields: [service_id], references: [id]) // Corrected single mapping
+  variant           product_variants? @relation(fields: [variant_id], references: [id])
+  vendor            vendors           @relation(fields: [vendor_id], references: [id])
+  return_items      return_items[]
+  vendorSettings    vendor_settings?  @relation(fields: [vendor_settingsId], references: [id])
+  vendor_settingsId Int?
 
   // Performance Compound Indexes
   @@index([order_id])
@@ -631,9 +619,11 @@ model payments {
   updated_at         DateTime?        @updatedAt
 
   // Relations
-  order  orders?  @relation(fields: [order_id], references: [id])
-  user   users    @relation(fields: [user_id], references: [id])
-  vendor vendors? @relation(fields: [vendor_id], references: [id])
+  order             orders?          @relation(fields: [order_id], references: [id])
+  user              users            @relation(fields: [user_id], references: [id])
+  vendor            vendors?         @relation(fields: [vendor_id], references: [id])
+  vendorSettings    vendor_settings? @relation(fields: [vendor_settingsId], references: [id])
+  vendor_settingsId Int?
 }
 
 model coupons {
@@ -656,10 +646,12 @@ model coupons {
   updated_at   DateTime?      @updatedAt
 
   // Relations
-  vendor  vendors   @relation(fields: [vendor_id], references: [id])
-  product products? @relation(fields: [product_id], references: [id])
-  service services? @relation(fields: [service_id], references: [id])
-  orders  orders[]
+  vendor            vendors          @relation(fields: [vendor_id], references: [id])
+  product           products?        @relation(fields: [product_id], references: [id])
+  service           services?        @relation(fields: [service_id], references: [id])
+  orders            orders[]
+  vendorSettings    vendor_settings? @relation(fields: [vendor_settingsId], references: [id])
+  vendor_settingsId Int?
 
   @@unique([vendor_id, code])
   @@index([status, expires_at])
@@ -715,10 +707,12 @@ model returns {
   updated_at    DateTime? @updatedAt
 
   // Relations
-  order  orders         @relation(fields: [order_id], references: [id])
-  user   users          @relation(fields: [user_id], references: [id])
-  vendor vendors?       @relation(fields: [vendor_id], references: [id])
-  items  return_items[]
+  order             orders           @relation(fields: [order_id], references: [id])
+  user              users            @relation(fields: [user_id], references: [id])
+  vendor            vendors?         @relation(fields: [vendor_id], references: [id])
+  items             return_items[]
+  vendorSettings    vendor_settings? @relation(fields: [vendor_settingsId], references: [id])
+  vendor_settingsId Int?
 }
 
 model return_items {
@@ -778,9 +772,11 @@ model support_tickets {
   updated_at    DateTime? @updatedAt
 
   // Relations
-  user    users?                   @relation(fields: [user_id], references: [id])
-  vendor  vendors?                 @relation(fields: [vendor_id], references: [id])
-  replies support_ticket_replies[]
+  user              users?                   @relation(fields: [user_id], references: [id])
+  vendor            vendors?                 @relation(fields: [vendor_id], references: [id])
+  replies           support_ticket_replies[]
+  vendorSettings    vendor_settings?         @relation(fields: [vendor_settingsId], references: [id])
+  vendor_settingsId Int?
 }
 
 model support_ticket_replies {
@@ -830,14 +826,27 @@ model activity_logs {
 model vendor_settings {
   id                   Int       @id @default(autoincrement())
   vendor_id            Int       @unique
-  site_name            String?
+  user_id              Int       @unique
+  store_name           String?
+  store_slug           String?   @unique
+  description          String?
+  logo                 String?
+  banner               String?
   phone_one            String?
   phone_two            String?
-  email                String?
+  facebook             String?
   twitter              String?
   instagram            String?
   linkedIn             String?
   snapchat             String?
+  whatsapp             String?
+  email                String?
+  website              String?
+  address              String?
+  city                 String?
+  state                String?
+  postal_code          String?
+  country_id           Int?
   terms_and_conditions String?
   privacy_policy       String?
   created_at           DateTime  @default(now())
@@ -845,6 +854,23 @@ model vendor_settings {
 
   // Relations
   vendor vendors @relation(fields: [vendor_id], references: [id], onDelete: Cascade)
+
+  // Relations
+  user             users              @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  products         products[]
+  order_items      order_items[]
+  product_images   product_images[]
+  product_variants product_variants[]
+  payments         payments[]
+  coupons          coupons[]
+  support_tickets  support_tickets[]
+  returns          returns[]
+  admins           admins[]
+  admin_audit_logs admin_audit_logs[]
+  services         services[]
+  service_bookings service_bookings[]
+
+  @@index([country_id])
 }
 
 // ===============================================
@@ -862,7 +888,6 @@ model countries {
 
   // Relations
   users    users[]
-  vendors  vendors[]
   currency currencies @relation(fields: [currency_id], references: [id], onDelete: Cascade)
 }
 
@@ -920,9 +945,11 @@ model services {
   meta_description          String?
   deleted_at                DateTime?
 
-  category      categories?      @relation(fields: [category_id], references: [id], onDelete: SetNull)
-  subcategory   subcategories?   @relation(fields: [subcategory_id], references: [id], onDelete: SetNull)
-  childcategory childcategories? @relation(fields: [childcategory_id], references: [id], onDelete: SetNull)
+  category          categories?      @relation(fields: [category_id], references: [id], onDelete: SetNull)
+  subcategory       subcategories?   @relation(fields: [subcategory_id], references: [id], onDelete: SetNull)
+  childcategory     childcategories? @relation(fields: [childcategory_id], references: [id], onDelete: SetNull)
+  vendorSettings    vendor_settings? @relation(fields: [vendor_settingsId], references: [id])
+  vendor_settingsId Int?
 
   @@index([vendor_id, status])
   @@index([category_id])
@@ -956,9 +983,11 @@ model service_bookings {
   note                      String?   @map("note")
 
   // Relations
-  service services @relation(fields: [service_id], references: [id]) // Linked safely here
-  user    users    @relation(fields: [user_id], references: [id])
-  vendors vendors   @relation(fields: [vendor_id], references: [id])
+  service           services         @relation(fields: [service_id], references: [id]) // Linked safely here
+  user              users            @relation(fields: [user_id], references: [id])
+  vendors           vendors          @relation(fields: [vendor_id], references: [id])
+  vendorSettings    vendor_settings? @relation(fields: [vendor_settingsId], references: [id])
+  vendor_settingsId Int?
 
   @@index([service_id, booking_status])
   @@map("service_bookings")

@@ -1,4 +1,6 @@
 import Order from '#models/order.model.js';
+import Vendor from '#models/vendor.model.js';
+import { updateVendorSettingsSchema } from '#schemas/vendor.schema.js';
 import {
     cancelOrderSchema,
     updateOrderStatusSchema,
@@ -51,7 +53,7 @@ export const getVendorOrders = async (req, res) => {
         return respondWithError(
             res,
             500,
-            error.message || 'Internal Server Error',
+            'Internal Server Error',
             ERROR_CODES.INTERNAL_SERVER_ERROR
         );
     }
@@ -112,56 +114,6 @@ export const getVendorOrderById = async (req, res) => {
         );
     } catch (error) {
         console.error('Error fetching vendor orders:', error);
-        return respondWithError(
-            res,
-            500,
-            error.message || 'Internal Server Error',
-            ERROR_CODES.INTERNAL_SERVER_ERROR
-        );
-    }
-};
-
-export const getCustomerOrders = async (req, res) => {
-    try {
-        const { session, query, pagination } = req;
-        const user = session?.user;
-
-        if (!user) {
-            return respondWithError(
-                res,
-                401,
-                'Unauthorized',
-                ERROR_CODES.UNAUTHORIZED
-            );
-        }
-
-        let vendorId;
-        if (user.role === ROLES.VENDOR) {
-            vendorId = user.id;
-        } else if (user.role === ROLES.VENDOR_ADMIN) {
-            vendorId = user.vendor_id;
-        } else if (user.role === ROLES.CUSTOMER) {
-            vendorId = user.vendor_id;
-        }
-
-        const { offset, limit } = pagination;
-        const { status } = query;
-
-        const orders = await Order.fetchCustomerOrders(
-            user.id,
-            vendorId,
-            status,
-            { offset: parseInt(offset), limit: parseInt(limit) }
-        );
-
-        return respondWithSuccess(
-            res,
-            200,
-            'Orders fetched successfully',
-            orders
-        );
-    } catch (error) {
-        console.error('Error fetching customer orders:', error);
         return respondWithError(
             res,
             500,
@@ -499,5 +451,36 @@ export const getLowStockProducts = async (req, res) => {
             error.message || 'Internal Server Error',
             ERROR_CODES.INTERNAL_SERVER_ERROR
         );
+    }
+};
+
+export const updateVendorSettings = async (req, res) => {
+    try {
+        if (!req.auth?.userId) {
+            return respondWithError(res, 401, 'Unauthorized', ERROR_CODES.UNAUTHORIZED);
+        }
+        const vendorId = req.auth.vendorId;
+        if (!Number.isInteger(vendorId) || vendorId <= 0) {
+            return respondWithError(res, 403, 'Forbidden', ERROR_CODES.FORBIDDEN);
+        }
+
+        const { error, value } = updateVendorSettingsSchema.validate(req.body, {
+            abortEarly: false,
+        });
+        if (error) {
+            return respondWithError(res, 400, error.details[0].message, ERROR_CODES.VALIDATION_ERROR);
+        }
+
+        const settings = await Vendor.updateVendorSettings(vendorId, value);
+        if (!settings) {
+            return respondWithError(res, 404, 'Vendor not found', ERROR_CODES.RESOURCE_NOT_FOUND);
+        }
+        return respondWithSuccess(res, 200, 'Vendor settings updated successfully', settings);
+    } catch (error) {
+        if (error.code === '23505') {
+            return respondWithError(res, 409, 'Storefront settings conflict with an existing store', ERROR_CODES.RESOURCE_CONFLICT);
+        }
+        console.error('Error updating vendor settings:', error);
+        return respondWithError(res, 500, 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);
     }
 };

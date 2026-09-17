@@ -1,7 +1,29 @@
 import pool from "#services/pg_pool.js";
 import { ROLES } from "#utils/helpers.js";
+import { updateVendorSettingsSchema } from '#schemas/vendor.schema.js';
 
 class VendorModel {
+    static async updateVendorSettings(vendorId, fields) {
+        const { error, value } = updateVendorSettingsSchema.validate(fields);
+        if (error) throw error;
+
+        // Identifiers come only from the validated storefront field allowlist.
+        const keys = Object.keys(value);
+        const columns = keys.map((key) => `"${key}"`);
+        const placeholders = keys.map((_, index) => `$${index + 2}`);
+        const updates = columns.map((column) => `${column} = EXCLUDED.${column}`);
+        const { rows } = await pool.query(
+            `INSERT INTO vendor_settings (vendor_id, user_id, ${columns.join(', ')}, updated_at)
+             SELECT id, user_id, ${placeholders.join(', ')}, NOW()
+             FROM vendors WHERE id = $1
+             ON CONFLICT (vendor_id) DO UPDATE
+             SET ${updates.join(', ')}, updated_at = NOW()
+             RETURNING *`,
+            [vendorId, ...Object.values(value)]
+        );
+        return rows[0] ?? null;
+    }
+
     static async createVendorUser({ vendor_id, email, password, firstname, lastname, phone, role }) {
         const client = await pool.connect();
         try {
