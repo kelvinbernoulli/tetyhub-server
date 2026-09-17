@@ -454,6 +454,56 @@ export const getLowStockProducts = async (req, res) => {
     }
 };
 
+export const getCustomerOrders = async (req, res) => {
+    try {
+        const { session, query, pagination } = req;
+        const user = session?.user;
+
+        if (!user) {
+            return respondWithError(
+                res,
+                401,
+                'Unauthorized',
+                ERROR_CODES.UNAUTHORIZED
+            );
+        }
+
+        let vendorId;
+        if (user.role === ROLES.VENDOR) {
+            vendorId = user.id;
+        } else if (user.role === ROLES.VENDOR_ADMIN) {
+            vendorId = user.vendor_id;
+        } else if (user.role === ROLES.CUSTOMER) {
+            vendorId = user.vendor_id;
+        }
+
+        const { offset, limit } = pagination;
+        const { status } = query;
+
+        const orders = await Order.fetchCustomerOrders(
+            user.id,
+            vendorId,
+            status,
+            { offset: parseInt(offset), limit: parseInt(limit) }
+        );
+
+        return respondWithSuccess(
+            res,
+            200,
+            'Orders fetched successfully',
+            orders
+        );
+    } catch (error) {
+        console.error('Error fetching customer orders:', error);
+        return respondWithError(
+            res,
+            500,
+            error.message || 'Internal Server Error',
+            ERROR_CODES.INTERNAL_SERVER_ERROR
+        );
+    }
+};
+
 export const updateVendorSettings = async (req, res) => {
     try {
         if (!req.auth?.userId) {
