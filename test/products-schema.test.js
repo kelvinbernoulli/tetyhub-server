@@ -213,3 +213,15 @@ test('product identifiers and option mappings survive validation', () => {
         undefined
     );
 });
+
+test('variant product creation needs only variant stock; simple products require stock', () => {
+    assert.ifError(
+        create.validate({
+            ...product,
+            stock: undefined,
+            has_variants: true,
+            variants: [{ price: 10, stock: 10 }],
+        }).error
+    );
+    assert.ok(create.validate({ ...product, stock: undefined }).error);
+});

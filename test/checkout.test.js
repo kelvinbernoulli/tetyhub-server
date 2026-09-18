@@ -13,9 +13,11 @@ import {
     quote,
     processCheckout,
     expireReservations,
+    releaseReservation,
 } from '../src/services/checkout.service.js';
 import Payment from '../src/models/payment.model.js';
 import Order from '../src/models/order.model.js';
+import { Cart } from '../src/models/cart.model.js';
 
 const input = () => ({
     firstname: 'Test',
@@ -49,6 +51,16 @@ const product = {
     track_inventory: true,
     free_shipping: true,
 };
+
+test('cart quantity updates require a variant for variant products', async (t) => {
+    const calls = database(t, (sql) => {
+        if (sql.includes('FROM products'))
+            return { rows: [{ id: 2, status: 'active', has_variants: true }] };
+    });
+    assert.deepEqual(await Cart.updateCart(1, { product_id: 2, quantity: 1 }),
+        { error: 'Choose a product variant', code: 422 });
+    assert.ok(!calls.some(({ sql }) => sql.startsWith('UPDATE')));
+});
 function database(t, handler) {
     const calls = [];
     const query = async (sql, values = []) => {
@@ -70,6 +82,71 @@ function quoteData(sql, items = [product]) {
     if (sql.startsWith('SELECT ci.id'))
         return { rows: items.map((item) => ({ ...item })) };
 }
+
+test('tracked stock accepts sufficient quantity and rejects sold-out variants', async (t) => {
+    const item = {
+        ...product,
+        has_variants: true,
+        variant_id: 8,
+        variant_status: 'active',
+        variant_product_id: product.product_id,
+    };
+    database(t, (sql) => quoteData(sql, [item]));
+    assert.equal((await quote(pool, 1)).total, '20.50');
+    item.stock = 0;
+    await assert.rejects(quote(pool, 1), /Insufficient stock/);
+    item.track_inventory = false;
+    assert.equal((await quote(pool, 1)).total, '20.50');
+});
+
+test('variant checkout reserves and releases only the selected SKU', async (t) => {
+    const item = {
+        ...product,
+        has_variants: true,
+        variant_id: 8,
+        variant_status: 'active',
+        variant_product_id: product.product_id,
+    };
+    const calls = database(t, (sql) => {
+        if (sql.startsWith('SELECT price, stock'))
+            return { rows: [{ ...item, product_id: product.product_id }] };
+        if (sql.startsWith('INSERT INTO orders'))
+            return {
+                rows: [
+                    {
+                        id: 5,
+                        total: '20.50',
+                        payment_status: 'unpaid',
+                        payment_method: 'paystack',
+                    },
+                ],
+            };
+        if (sql.startsWith('UPDATE product_variants SET stock'))
+            return { rows: [{ id: 8 }], rowCount: 1 };
+        if (sql.startsWith('SELECT * FROM order_items'))
+            return { rows: [item] };
+        return quoteData(sql, [item]);
+    });
+    t.mock.method(Payment, 'initiatePayment', async () => ({}));
+    await processCheckout({ id: 1 }, input());
+    await releaseReservation(pool, { id: 5 }, 'Expired');
+    const writes = calls.filter(({ sql }) =>
+        sql.startsWith('UPDATE product_variants SET stock')
+    );
+    assert.equal(writes.length, 2);
+    assert.match(writes[0].sql, /stock = stock - \$1/);
+    assert.match(writes[1].sql, /stock = stock \+ \$1/);
+    assert.deepEqual(
+        writes.map(({ values }) => values),
+        [
+            [2, 8],
+            [2, 8],
+        ]
+    );
+    assert.ok(
+        !calls.some(({ sql }) => sql.startsWith('UPDATE products SET stock'))
+    );
+});
 
 test('checkout preserves gateway and requires a valid retry key', () => {
     const valid = checkoutSchema.validate(input());

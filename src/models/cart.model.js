@@ -201,6 +201,10 @@ export class Cart {
 
             const product = productRows[0];
 
+            if (product.has_variants && !variant_id) {
+                await client.query('ROLLBACK');
+                return { error: 'Choose a product variant', code: 422 };
+            }
             let price = product.price;
 
             if (variant_id) {

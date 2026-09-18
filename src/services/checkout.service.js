@@ -37,7 +37,8 @@ export async function quote(client, userId, data = {}, lock = false) {
             'Check out products with different currencies separately'
         );
     const currency = items[0].currency;
-    if (!['NGN', 'USD', 'EUR', 'GBP'].includes(currency))
+    console.log('Checkout currency:', currency);
+    if (!['NGN'].includes(currency))
         throw new CheckoutError('Unsupported checkout currency');
     for (const item of items) {
         if (lock && item.variant_id) {
@@ -68,11 +69,12 @@ export async function quote(client, userId, data = {}, lock = false) {
             item.quantity > 100
         )
             throw new CheckoutError('Invalid cart quantity');
-        if (item.track_inventory && item.stock < item.quantity)
+        if (item.track_inventory && item.stock < item.quantity) {
             throw new CheckoutError(
                 `Insufficient stock for ${item.product_name}`,
                 409
             );
+        }
         item.subtotal_minor = minorUnits(item.price) * item.quantity;
         item.subtotal = majorUnits(item.subtotal_minor);
         minorUnits(item.subtotal);

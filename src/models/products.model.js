@@ -3,6 +3,7 @@ import { S3upload, S3delete } from '#services/s3bucket.js';
 import { randomUUID } from 'node:crypto';
 import slugify from 'slugify';
 import { productObjectKey } from '#utils/product-media.js';
+import { productStockSql, productAvailableSql } from '#utils/product-stock.js';
 const PRODUCT_FIELDS = [
     'category_id',
     'subcategory_id',
@@ -363,13 +364,14 @@ function selection(vendorView = false) {
     return (
         (vendorView ? 'p.*' : PUBLIC_FIELDS.map((k) => 'p.' + k).join(', ')) +
         `
- , c.name AS category_name, sc.name AS subcategory_name,
+ , ${productStockSql} AS stock, ${productAvailableSql} AS in_stock,
+ c.name AS category_name, sc.name AS subcategory_name,
  COALESCE((SELECT jsonb_agg(to_jsonb(pi) ORDER BY pi.position,pi.id) FROM product_images pi WHERE pi.product_id=p.id),'[]'::jsonb) AS images,
  COALESCE((SELECT jsonb_agg(to_jsonb(pa) ORDER BY pa.position,pa.id) FROM product_attributes pa WHERE pa.product_id=p.id),'[]'::jsonb) AS attributes,
  COALESCE((SELECT jsonb_agg(to_jsonb(po) || jsonb_build_object('values',COALESCE((SELECT jsonb_agg(to_jsonb(pov) ORDER BY pov.position,pov.id) FROM product_option_values pov WHERE pov.option_id=po.id),'[]'::jsonb)) ORDER BY po.position,po.id) FROM product_options po WHERE po.product_id=p.id),'[]'::jsonb) AS options,
  COALESCE((SELECT jsonb_agg(` +
         variantFields +
-        ` || jsonb_build_object('option_values',COALESCE((SELECT jsonb_agg(vov.option_value_id ORDER BY vov.option_value_id) FROM variant_option_values vov WHERE vov.variant_id=pv.id),'[]'::jsonb)) ORDER BY pv.id) FROM product_variants pv WHERE pv.product_id=p.id AND pv.status='active'),'[]'::jsonb) AS variants,
+        ` || jsonb_build_object('in_stock', (NOT p.track_inventory OR pv.stock > 0), 'option_values',COALESCE((SELECT jsonb_agg(vov.option_value_id ORDER BY vov.option_value_id) FROM variant_option_values vov WHERE vov.variant_id=pv.id),'[]'::jsonb)) ORDER BY pv.id) FROM product_variants pv WHERE pv.product_id=p.id AND pv.status='active'),'[]'::jsonb) AS variants,
  (SELECT ROUND(AVG(r.rating),1) FROM reviews r WHERE r.product_id=p.id AND r.status='approved') AS avg_rating,
  (SELECT COUNT(*)::int FROM reviews r WHERE r.product_id=p.id AND r.status='approved') AS review_count,
  (SELECT COALESCE(SUM(oi.quantity),0) FROM order_items oi WHERE oi.product_id=p.id) AS total_sold`
@@ -399,6 +401,7 @@ export class Product {
                     randomUUID(),
                 has_variants: Boolean(data.variants?.length),
             };
+            if (fields.has_variants) delete fields.stock;
             if (data.thumbnail !== undefined)
                 fields.thumbnail = await upload(
                     data.thumbnail,
@@ -427,6 +430,22 @@ export class Product {
             checkPrices({ ...existing, ...data });
             await validateRelations(client, { ...existing, ...data });
             const fields = pick(data, PRODUCT_FIELDS);
+            const nextHasVariants =
+                data.has_variants === false
+                    ? false
+                    : data.variants !== undefined
+                      ? data.variants.length > 0
+                      : existing.has_variants;
+            if (nextHasVariants) {
+                if (data.stock !== undefined && data.variants === undefined)
+                    throw productError(
+                        'Manage stock through variants for this product'
+                    );
+                delete fields.stock;
+            } else if (existing.has_variants) {
+                // Never revive an unrelated legacy product quantity when disabling variants.
+                fields.stock = data.stock ?? 0;
+            }
             if (data.thumbnail !== undefined) {
                 fields.thumbnail = await upload(
                     data.thumbnail,
@@ -540,8 +559,7 @@ export class Product {
             bind('p.price <= ?', filters.max_price);
         if (filters.tags?.length) bind('p.tags && ?::text[]', filters.tags);
         if (filters.in_stock !== undefined) {
-            const available =
-                "(NOT p.track_inventory OR (CASE WHEN p.has_variants THEN EXISTS (SELECT 1 FROM product_variants sv WHERE sv.product_id = p.id AND sv.status = 'active' AND sv.stock > 0) ELSE p.stock > 0 END))";
+            const available = productAvailableSql;
             where.push(filters.in_stock ? available : 'NOT ' + available);
         }
         if (filters.related) {
@@ -577,7 +595,10 @@ export class Product {
             : 'created_at';
         const direction = filters.sort_order === 'ASC' ? 'ASC' : 'DESC';
         const order =
-            sorting[filters.sort_by] ?? 'p.' + column + ' ' + direction;
+            sorting[filters.sort_by] ??
+            (column === 'stock' ? productStockSql : 'p.' + column) +
+                ' ' +
+                direction;
         const clause = where.join(' AND ');
         const count = await pool.query(
             'SELECT COUNT(*)::int AS total FROM products p WHERE ' + clause,

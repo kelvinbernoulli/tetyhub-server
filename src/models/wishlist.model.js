@@ -1,3 +1,4 @@
+import { productAvailableSql } from '#utils/product-stock.js';
 export class Wishlist {
     static async addToWishlist(userId, vendorId, productId) {
         const client = await pool.connect();
@@ -76,7 +77,7 @@ export class Wishlist {
                         'compare_at_price', p.compare_at_price,
                         'discount', p.discount,
                         'status', p.status,
-                        'in_stock', p.stock > 0,
+                        'in_stock', (p.status = 'active' AND p.deleted_at IS NULL AND ${productAvailableSql}),
                         'added_at', wi.created_at
                     ) ORDER BY wi.created_at DESC) AS items
                 FROM wishlists w

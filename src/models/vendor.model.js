@@ -1,3 +1,4 @@
+import { productStockSql } from '#utils/product-stock.js';
 import pool from "#services/pg_pool.js";
 import { ROLES } from "#utils/helpers.js";
 import { updateVendorSettingsSchema } from '#schemas/vendor.schema.js';
@@ -196,9 +197,9 @@ class VendorModel {
                     COUNT(DISTINCT p.id)                                            AS total_products,
                     COUNT(DISTINCT CASE WHEN p.status = 'active' 
                         THEN p.id END)                                              AS active_products,
-                    COUNT(DISTINCT CASE WHEN p.stock <= p.low_stock_threshold
+                    COUNT(DISTINCT CASE WHEN p.track_inventory AND ${productStockSql} <= p.low_stock_threshold
                         THEN p.id END)                                              AS low_stock_products,
-                    COUNT(DISTINCT CASE WHEN p.stock = 0 
+                    COUNT(DISTINCT CASE WHEN p.track_inventory AND ${productStockSql} = 0
                         THEN p.id END)                                              AS out_of_stock_products,
 
                     -- Refunds
@@ -277,7 +278,7 @@ class VendorModel {
                     p.name,
                     p.thumbnail,
                     p.price,
-                    p.stock,
+                    ${productStockSql} AS stock,
                     SUM(oi.quantity)            AS total_sold,
                     SUM(oi.subtotal)            AS total_revenue,
                     COUNT(DISTINCT o.id)        AS order_count
@@ -308,18 +309,18 @@ class VendorModel {
                     p.id,
                     p.name,
                     p.thumbnail,
-                    p.stock,
+                    ${productStockSql} AS stock,
                     p.low_stock_threshold,
                     p.status,
                     CASE
-                        WHEN p.stock = 0 THEN 'out_of_stock'
-                        WHEN p.stock <= p.low_stock_threshold THEN 'low_stock'
+                        WHEN ${productStockSql} = 0 THEN 'out_of_stock'
+                        WHEN ${productStockSql} <= p.low_stock_threshold THEN 'low_stock'
                     END AS stock_status
                 FROM products p
                 WHERE p.vendor_id = $1
-                AND p.stock <= p.low_stock_threshold
+                AND p.track_inventory AND ${productStockSql} <= p.low_stock_threshold
                 AND p.deleted_at IS NULL
-                ORDER BY p.stock ASC
+                ORDER BY ${productStockSql} ASC
                 LIMIT $2`,
                 [vendorId, limit]
             );

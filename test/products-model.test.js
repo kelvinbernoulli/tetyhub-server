@@ -170,7 +170,7 @@ test('foreign variant IDs are rejected and disabling variants archives them', as
     );
     assert.deepEqual(
         calls.find((call) => call.sql.startsWith('UPDATE products')).values,
-        [false, 7]
+        [0, false, 7]
     );
 });
 
@@ -237,5 +237,36 @@ test('S3 cleanup converts trusted URLs to keys and rejects other buckets', () =>
             'bucket',
             'region'
         )
+    );
+});
+
+test('variant products reject independent stock edits', async (t) => {
+    const calls = database(t);
+    await assert.rejects(
+        Product.update(7, 3, { stock: 200 }),
+        /Manage stock through variants/
+    );
+    assert.ok(!calls.some(({ sql }) => sql.startsWith('UPDATE')));
+});
+test('variant writes ignore legacy totals and disabling variants accepts explicit stock', async (t) => {
+    const calls = database(t, (sql) =>
+        sql.startsWith('SELECT * FROM product_variants')
+            ? { rows: [{ id: 11, price: 10 }] }
+            : undefined
+    );
+    await Product.update(7, 3, {
+        stock: 200,
+        variants: [{ id: 11, price: 10, stock: 10 }],
+    });
+    assert.ok(
+        !calls
+            .find(({ sql }) => sql.startsWith('UPDATE products'))
+            .sql.includes('stock =')
+    );
+    calls.length = 0;
+    await Product.update(7, 3, { has_variants: false, stock: 12 });
+    assert.deepEqual(
+        calls.find(({ sql }) => sql.startsWith('UPDATE products')).values,
+        [12, false, 7]
     );
 });

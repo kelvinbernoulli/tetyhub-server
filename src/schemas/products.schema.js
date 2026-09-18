@@ -187,7 +187,9 @@ export const createProductSchema = Joi.object({
         .label('Discount (%)'), // percentage discount for the product
 
     // Inventory
-    stock: Joi.number().integer().max(MAX_INT).min(0).required().label('Stock'), // available quantity
+    stock: Joi.number().integer().max(MAX_INT).min(0)
+        .when('has_variants', { is: true, then: Joi.optional(), otherwise: Joi.required() })
+        .label('Stock'),
     low_stock_threshold: Joi.number()
         .integer()
         .max(MAX_INT)

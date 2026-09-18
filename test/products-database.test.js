@@ -97,6 +97,9 @@ test(
             assert.equal(created.attributes.length, 1);
             assert.equal(created.options[0].values.length, 2);
             assert.equal(created.variants.length, 2);
+            assert.equal(created.stock, 1);
+            assert.equal(created.in_stock, true);
+            assert.equal(created.variants[1].in_stock, false);
             assert.equal(created.variants[0].option_values.length, 1);
             assert.equal(await Product.findPublicById(created.id), null);
             assert.equal(
@@ -123,6 +126,7 @@ test(
                 variants: [{ id: created.variants[0].id, price: 11, stock: 3 }],
             });
             assert.equal(updated.variants[0].id, created.variants[0].id);
+            assert.equal(updated.stock, 3);
             assert.deepEqual(
                 updated.variants[0].option_values,
                 created.variants[0].option_values
