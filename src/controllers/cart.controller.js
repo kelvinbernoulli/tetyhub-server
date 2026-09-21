@@ -79,9 +79,9 @@ export const cartItems = async (req, res) => {
             );
         }
 
-        return respondWithSuccess(res, 200, 'Item added to cart', result);
+        return respondWithSuccess(res, 200, 'Cart items retrieved successfully', result);
     } catch (error) {
-        console.error('Error adding to cart:', error);
+        console.error('Error retrieving cart items:', error);
         return respondWithError(
             res,
             500,

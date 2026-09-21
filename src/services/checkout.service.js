@@ -37,7 +37,6 @@ export async function quote(client, userId, data = {}, lock = false) {
             'Check out products with different currencies separately'
         );
     const currency = items[0].currency;
-    console.log('Checkout currency:', currency);
     if (!['NGN'].includes(currency))
         throw new CheckoutError('Unsupported checkout currency');
     for (const item of items) {
