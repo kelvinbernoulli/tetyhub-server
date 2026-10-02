@@ -1,107 +1,157 @@
-import Notification from "#models/notification.model.js";
-import ERROR_CODES from "#utils/error.codes.js";
-import { respondWithError, respondWithSuccess } from "#utils/response.js";
+import Notification from '#models/notification.model.js';
+import {
+    notificationQuerySchema,
+    notificationReadSchema,
+} from '#schemas/notifications.schema.js';
+import ERROR_CODES from '#utils/error.codes.js';
+import { respondWithError, respondWithSuccess } from '#utils/response.js';
+
+const fail = (message, status) => Object.assign(new Error(message), { status });
+const userId = (req) => {
+    const id = req.auth?.userId;
+    if (!Number.isSafeInteger(id) || id <= 0) throw fail('Unauthorized', 401);
+    return id;
+};
+const notificationId = (req) => {
+    const value = String(req.params.notificationId);
+    const id = Number(value);
+    if (
+        !/^\d+$/.test(value) ||
+        !Number.isSafeInteger(id) ||
+        id <= 0 ||
+        id > 2147483647
+    )
+        throw fail('Invalid notification ID', 400);
+    return id;
+};
+const validate = (schema, input) => {
+    const { error, value } = schema.validate(input ?? {}, {
+        abortEarly: false,
+    });
+    if (error) throw fail(error.details[0].message, 400);
+    return value;
+};
+const handleError = (res, error) => {
+    const status = error.status || 500;
+    const codes = {
+        400: ERROR_CODES.VALIDATION_ERROR,
+        401: ERROR_CODES.UNAUTHORIZED,
+        404: ERROR_CODES.RESOURCE_NOT_FOUND,
+    };
+    if (status === 500) console.error('Notification operation failed:', error);
+    return respondWithError(
+        res,
+        status,
+        status === 500 ? 'Internal server error' : error.message,
+        codes[status] || ERROR_CODES.INTERNAL_SERVER_ERROR
+    );
+};
 
 export const getUserNotifications = async (req, res) => {
     try {
-        const { session, query, pagination } = req;
-        const user = session?.user;
-
-        if (!user) {
-            return respondWithError(res, 401, 'Unauthorized', ERROR_CODES.UNAUTHORIZED);
-        }
-
-        const { offset, limit } = pagination;
-        const { unread_only } = query;
-        const unreadOnly = unread_only === 'true';
-
-        const notifications = await Notification.getUserNotifications(user.id, {
-            offset,
-            limit,
-            unreadOnly
+        const id = userId(req);
+        const { unread_only, ...options } = validate(
+            notificationQuerySchema,
+            req.query
+        );
+        const rows = await Notification.getUserNotifications(id, {
+            ...options,
+            unreadOnly: unread_only,
         });
-
-        return respondWithSuccess(res, 200, 'Notifications fetched successfully', notifications);
+        return respondWithSuccess(
+            res,
+            200,
+            'Notifications fetched successfully',
+            rows
+        );
     } catch (error) {
-        console.error("Error fetching notifications:", error);
-        return respondWithError(res, 500, error.message || 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);
+        return handleError(res, error);
     }
 };
 
 export const getUserNotification = async (req, res) => {
     try {
-        const { session, params } = req;
-        const user = session?.user;
-
-        const notificationID  = parseInt(params.notificationId);
-
-        const notification = await Notification.getUserNotification(user.id, notificationID);
-
-        if (!notification) {
-            return respondWithError(res, 404, 'Notification not found', ERROR_CODES.RESOURCE_NOT_FOUND);
-        }
-
-        return respondWithSuccess(res, 200, 'Notification fetched successfully', notification);
+        const id = userId(req);
+        const notification = await Notification.getUserNotification(
+            id,
+            notificationId(req)
+        );
+        if (!notification) throw fail('Notification not found', 404);
+        return respondWithSuccess(
+            res,
+            200,
+            'Notification fetched successfully',
+            notification
+        );
     } catch (error) {
-        console.error("Error fetching notification:", error);
-        return respondWithError(res, 500, 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);
+        return handleError(res, error);
     }
 };
 
 export const markAsRead = async (req, res) => {
     try {
-        const { session, params } = req;
-        const user = session?.user;
-
-        if (!user) {
-            return respondWithError(res, 401, 'Unauthorized', ERROR_CODES.UNAUTHORIZED);
-        }
-
-        const { notificationId } = params;
-
-        const notification = await Notification.markAsRead(notificationId, user.id);
-
-        if (!notification) {
-            return respondWithError(res, 404, 'Notification not found', ERROR_CODES.RESOURCE_NOT_FOUND);
-        }
-
-        return respondWithSuccess(res, 200, 'Notification marked as read', notification);
+        const id = userId(req);
+        const notification = await Notification.markAsRead(
+            notificationId(req),
+            id
+        );
+        if (!notification) throw fail('Notification not found', 404);
+        return respondWithSuccess(
+            res,
+            200,
+            'Notification marked as read',
+            notification
+        );
     } catch (error) {
-        console.error("Error marking notification as read:", error);
-        return respondWithError(res, 500, error.message || 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);
+        return handleError(res, error);
     }
 };
 
 export const markAllAsRead = async (req, res) => {
     try {
-        const { session } = req;
-        const user = session?.user;
-
-        const notifications = await Notification.markAllAsRead(user.id);
-
-        return respondWithSuccess(res, 200, 'All notifications marked as read', {
-            count: notifications.length
-        });
+        const id = userId(req);
+        const { through_id } = validate(notificationReadSchema, req.body);
+        const rows = await Notification.markAllAsRead(id, through_id);
+        return respondWithSuccess(
+            res,
+            200,
+            'All notifications marked as read',
+            { count: rows.length }
+        );
     } catch (error) {
-        console.error("Error marking all notifications as read:", error);
-        return respondWithError(res, 500, error.message || 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);
+        return handleError(res, error);
     }
 };
 
 export const getUnreadCount = async (req, res) => {
     try {
-        const { session } = req;
-        const user = session?.user;
-
-        if (!user) {
-            return respondWithError(res, 401, 'Unauthorized', ERROR_CODES.UNAUTHORIZED);
-        }
-
-        const count = await Notification.getUnreadCount(user.id);
-
-        return respondWithSuccess(res, 200, 'Unread count fetched successfully', { count });
+        const count = await Notification.getUnreadCount(userId(req));
+        return respondWithSuccess(
+            res,
+            200,
+            'Unread count fetched successfully',
+            { count }
+        );
     } catch (error) {
-        console.error("Error fetching unread count:", error);
-        return respondWithError(res, 500, error.message || 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);
+        return handleError(res, error);
+    }
+};
+
+export const deleteNotification = async (req, res) => {
+    try {
+        const id = userId(req);
+        const notification = await Notification.deleteNotification(
+            notificationId(req),
+            id
+        );
+        if (!notification) throw fail('Notification not found', 404);
+        return respondWithSuccess(
+            res,
+            200,
+            'Notification deleted successfully',
+            notification
+        );
+    } catch (error) {
+        return handleError(res, error);
     }
 };

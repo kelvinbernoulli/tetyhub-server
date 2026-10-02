@@ -1,370 +1,157 @@
-import pool from "#services/pg_pool.js";
-import Notification from "#models/notification.model.js";
+import pool from '#services/pg_pool.js';
+import Notification from '#models/notification.model.js';
+import { CheckoutError, transaction } from '#utils/checkout.js';
+import { fulfillmentStatus, validateShipmentTransition } from '#services/shipment.js';
+
+const editableFields = ['tracking_number', 'carrier', 'shipping_method', 'estimated_delivery', 'shipping_cost', 'status', 'notes'];
+const publicFields = ['tracking_number', 'carrier', 'shipping_method', 'estimated_delivery', 'status'];
+
+async function syncOrder(client, order, changedBy) {
+    if (['cancelled', 'returned', 'refunded', 'payment_review'].includes(order.status)) return;
+    const { rows: shipments } = await client.query('SELECT vendor_id, status FROM shipments WHERE order_id = $1', [order.id]);
+    const { rows } = await client.query('SELECT COUNT(DISTINCT vendor_id)::int AS count FROM order_items WHERE order_id = $1 AND product_id IS NOT NULL', [order.id]);
+    const status = fulfillmentStatus(shipments, rows[0].count);
+    // Packing is a manual step; creating a pending shipment should not undo it.
+    if (!status || status === order.status || (status === 'awaiting_shipment' && order.status === 'packed')) return;
+    await client.query('UPDATE orders SET status = $1, updated_at = NOW() WHERE id = $2', [status, order.id]);
+    await client.query(
+        'INSERT INTO order_status_history (order_id, status, note, changed_by) VALUES ($1, $2, $3, $4)',
+        [order.id, status, 'Shipment progress updated', changedBy]
+    );
+}
+
+async function history(client, shipment, data, changedBy) {
+    const { rows } = await client.query(
+        `INSERT INTO shipment_tracking_history (shipment_id, status, location, description, changed_by)
+         VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+        [shipment.id, shipment.status, data.location ?? null,
+            data.description ?? data.tracking_description ?? `Shipment ${shipment.status.replaceAll('_', ' ')}`, changedBy]
+    );
+    return rows[0];
+}
 
 class Shipment {
-    static async createShipment(orderId, vendorId, shipmentData) {
-        const client = await pool.connect();
-        try {
-            await client.query('BEGIN');
-
-            // 1. Verify order belongs to vendor and is in correct status
-            const { rows: orderRows } = await client.query(
-                `SELECT * FROM orders WHERE id = $1 AND vendor_id = $2`,
+    static async createShipment(orderId, vendorId, data, changedBy = null) {
+        if (!vendorId) throw new CheckoutError('Forbidden', 403);
+        return transaction(pool, async client => {
+            const { rows } = await client.query(
+                `SELECT * FROM orders WHERE id = $1 AND EXISTS
+                 (SELECT 1 FROM order_items oi WHERE oi.order_id = orders.id AND oi.vendor_id = $2 AND oi.product_id IS NOT NULL) FOR UPDATE`,
                 [orderId, vendorId]
             );
-
-            if (orderRows.length === 0) {
-                return { error: 'Order not found', code: 404 };
+            const order = rows[0];
+            if (!order) throw new CheckoutError('Order not found', 404);
+            if (order.payment_status !== 'paid' || !['processing', 'awaiting_shipment', 'packed', 'shipped', 'out_for_delivery'].includes(order.status)) {
+                throw new CheckoutError('Only paid orders awaiting fulfillment can be shipped', 422);
             }
-
-            const order = orderRows[0];
-            if (!['processing', 'awaiting_shipment', 'packed'].includes(order.status)) {
-                return {
-                    error: `Cannot create shipment for order with status: ${order.status}`,
-                    code: 422
-                };
-            }
-
-            // 2. Check if shipment already exists
-            const { rows: existingShipment } = await client.query(
-                `SELECT id FROM shipments WHERE order_id = $1`,
-                [orderId]
+            const existing = await client.query(
+                'SELECT id FROM shipments WHERE order_id = $1 AND (vendor_id = $2 OR vendor_id IS NULL)', [orderId, vendorId]
             );
-
-            if (existingShipment.length > 0) {
-                return { error: 'Shipment already exists for this order', code: 409 };
-            }
-
-            // 3. Create shipment
-            const { rows: shipmentRows } = await client.query(
-                `INSERT INTO shipments
-                (order_id, tracking_number, carrier, shipping_method, estimated_delivery, shipping_cost, status, notes)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                RETURNING *`,
-                [
-                    orderId,
-                    shipmentData.tracking_number,
-                    shipmentData.carrier,
-                    shipmentData.shipping_method ?? null,
-                    shipmentData.estimated_delivery ?? null,
-                    shipmentData.shipping_cost ?? 0,
-                    'pending',
-                    shipmentData.notes ?? null
-                ]
+            if (existing.rows.length) throw new CheckoutError('Shipment already exists or requires legacy reconciliation', 409);
+            const { rows: created } = await client.query(
+                `INSERT INTO shipments (order_id, vendor_id, tracking_number, carrier, shipping_method, estimated_delivery, shipping_cost, status, notes)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8) RETURNING *`,
+                [orderId, vendorId, data.tracking_number, data.carrier, data.shipping_method ?? null,
+                    data.estimated_delivery ?? null, data.shipping_cost ?? 0, data.notes ?? null]
             );
-
-            const shipment = shipmentRows[0];
-
-            // 4. Insert initial tracking history
-            await client.query(
-                `INSERT INTO shipment_tracking_history
-                (shipment_id, status, location, description)
-                VALUES ($1, $2, $3, $4)`,
-                [
-                    shipment.id,
-                    'pending',
-                    shipmentData.location ?? null,
-                    'Shipment created and pending processing'
-                ]
-            );
-
-            // 5. Update order status to awaiting_shipment if not already packed
-            if (order.status === 'processing') {
-                await client.query(
-                    `UPDATE orders SET status = 'awaiting_shipment', updated_at = NOW() WHERE id = $1`,
-                    [orderId]
-                );
-
-                // Send notification for status change
-                try {
-                    await Notification.notifyOrderStatusChange(orderId, order.user_id, order.status, 'awaiting_shipment');
-                } catch (notificationError) {
-                    console.error("Error sending shipment notification:", notificationError);
-                }
-            }
-
-            await client.query('COMMIT');
-
-            // Send shipment notification
-            try {
-                await Notification.notifyShipmentUpdate(orderId, order.user_id, shipment);
-            } catch (notificationError) {
-                console.error("Error sending shipment notification:", notificationError);
-            }
-
+            const shipment = created[0];
+            await history(client, shipment, { ...data, description: 'Shipment created' }, changedBy);
+            await syncOrder(client, order, changedBy);
+            await Notification.notifyShipmentUpdate(order.id, order.user_id, shipment, client);
             return shipment;
-        } catch (error) {
-            await client.query('ROLLBACK');
-            console.error("Error creating shipment:", error);
-            throw error;
-        } finally {
-            client.release();
-        }
+        });
     }
 
-    static async updateShipment(shipmentId, vendorId, updateData) {
-        const client = await pool.connect();
-        try {
-            await client.query('BEGIN');
-
-            // 1. Verify shipment belongs to vendor
-            const { rows: shipmentRows } = await client.query(
-                `SELECT s.*, o.vendor_id FROM shipments s
-                JOIN orders o ON o.id = s.order_id
-                WHERE s.id = $1 AND o.vendor_id = $2`,
-                [shipmentId, vendorId]
+    static async updateShipment(shipmentId, vendorId, data, changedBy = null, tracking = false) {
+        if (!vendorId) throw new CheckoutError('Forbidden', 403);
+        return transaction(pool, async client => {
+            // Lock the order first on every write, serializing fulfillment across its vendors.
+            const { rows: orders } = await client.query(
+                `SELECT o.* FROM orders o JOIN shipments s ON s.order_id = o.id
+                 WHERE s.id = $1 AND s.vendor_id = $2 FOR UPDATE OF o`, [shipmentId, vendorId]
             );
-
-            if (shipmentRows.length === 0) {
-                return { error: 'Shipment not found', code: 404 };
+            const order = orders[0];
+            if (!order) throw new CheckoutError('Shipment not found', 404);
+            if (order.payment_status !== 'paid' || ['cancelled', 'refunded', 'payment_review'].includes(order.status)) {
+                throw new CheckoutError('This order cannot receive shipment updates', 409);
             }
-
-            const shipment = shipmentRows[0];
-
-            // 2. Update shipment
-            const updateFields = [];
-            const values = [];
-            let paramIndex = 1;
-
-            if (updateData.tracking_number !== undefined) {
-                updateFields.push(`tracking_number = $${paramIndex++}`);
-                values.push(updateData.tracking_number);
-            }
-            if (updateData.carrier !== undefined) {
-                updateFields.push(`carrier = $${paramIndex++}`);
-                values.push(updateData.carrier);
-            }
-            if (updateData.shipping_method !== undefined) {
-                updateFields.push(`shipping_method = $${paramIndex++}`);
-                values.push(updateData.shipping_method);
-            }
-            if (updateData.estimated_delivery !== undefined) {
-                updateFields.push(`estimated_delivery = $${paramIndex++}`);
-                values.push(updateData.estimated_delivery);
-            }
-            if (updateData.shipping_cost !== undefined) {
-                updateFields.push(`shipping_cost = $${paramIndex++}`);
-                values.push(updateData.shipping_cost);
-            }
-            if (updateData.status !== undefined) {
-                updateFields.push(`status = $${paramIndex++}`);
-                values.push(updateData.status);
-            }
-            if (updateData.notes !== undefined) {
-                updateFields.push(`notes = $${paramIndex++}`);
-                values.push(updateData.notes);
-            }
-
-            if (updateFields.length === 0) {
-                return shipment;
-            }
-
-            updateFields.push(`updated_at = NOW()`);
-            values.push(shipmentId);
-
-            const { rows: updatedRows } = await client.query(
-                `UPDATE shipments SET ${updateFields.join(', ')} WHERE id = $${paramIndex} RETURNING *`,
-                values
-            );
-
-            const updatedShipment = updatedRows[0];
-
-            // 4. Insert tracking history if status changed
-            if (updateData.status && updateData.status !== shipment.status) {
-                await client.query(
-                    `INSERT INTO shipment_tracking_history
-                    (shipment_id, status, location, description)
-                    VALUES ($1, $2, $3, $4)`,
-                    [
-                        shipmentId,
-                        updateData.status,
-                        updateData.location ?? null,
-                        updateData.tracking_description ?? `Status updated to ${updateData.status}`
-                    ]
+            const { rows } = await client.query('SELECT * FROM shipments WHERE id = $1 AND vendor_id = $2 FOR UPDATE', [shipmentId, vendorId]);
+            const shipment = rows[0];
+            if (!shipment) throw new CheckoutError('Shipment not found', 404);
+            if (data.status !== undefined) validateShipmentTransition(shipment.status, data.status);
+            const fields = editableFields.filter(field => data[field] !== undefined);
+            const values = fields.map(field => data[field]);
+            const updates = fields.map((field, index) => `${field} = $${index + 1}`);
+            if (data.status === 'delivered' && shipment.status !== 'delivered') updates.push('actual_delivery = NOW()');
+            let updated = shipment;
+            if (updates.length) {
+                values.push(shipmentId);
+                const result = await client.query(
+                    `UPDATE shipments SET ${updates.join(', ')}, updated_at = NOW() WHERE id = $${values.length} RETURNING *`, values
                 );
+                updated = result.rows[0];
             }
-
-            // 5. Update order status based on shipment status
-            if (updateData.status) {
-                let newOrderStatus = null;
-
-                switch (updateData.status) {
-                    case 'shipped':
-                        newOrderStatus = 'shipped';
-                        break;
-                    case 'in_transit':
-                        newOrderStatus = 'out_for_delivery';
-                        break;
-                    case 'delivered':
-                        newOrderStatus = 'delivered';
-                        break;
-                }
-
-                if (newOrderStatus) {
-                    await client.query(
-                        `UPDATE orders SET status = $1, updated_at = NOW() WHERE id = $2`,
-                        [newOrderStatus, shipment.order_id]
-                    );
-
-                    // Send notification for order status change
-                    try {
-                        const { rows: orderRows } = await client.query(
-                            `SELECT user_id FROM orders WHERE id = $1`,
-                            [shipment.order_id]
-                        );
-                        if (orderRows.length > 0) {
-                            await Notification.notifyOrderStatusChange(
-                                shipment.order_id,
-                                orderRows[0].user_id,
-                                null, // We don't have old status here
-                                newOrderStatus
-                            );
-                        }
-                    } catch (notificationError) {
-                        console.error("Error sending order status notification:", notificationError);
-                    }
-                }
+            const changed = data.status !== undefined && data.status !== shipment.status;
+            const hasEvent = tracking || changed || data.location !== undefined || data.tracking_description !== undefined;
+            const event = hasEvent ? await history(client, updated, data, changedBy) : null;
+            if (changed) await syncOrder(client, order, changedBy);
+            if (hasEvent || publicFields.some(field => data[field] !== undefined && String(data[field]) !== String(shipment[field]))) {
+                await Notification.notifyShipmentUpdate(order.id, order.user_id, updated, client);
             }
-
-            await client.query('COMMIT');
-
-            // Send shipment update notification
-            try {
-                const { rows: orderRows } = await client.query(
-                    `SELECT user_id FROM orders WHERE id = $1`,
-                    [shipment.order_id]
-                );
-                if (orderRows.length > 0) {
-                    await Notification.notifyShipmentUpdate(shipment.order_id, orderRows[0].user_id, updatedShipment);
-                }
-            } catch (notificationError) {
-                console.error("Error sending shipment update notification:", notificationError);
-            }
-
-            return updatedShipment;
-        } catch (error) {
-            await client.query('ROLLBACK');
-            console.error("Error updating shipment:", error);
-            throw error;
-        } finally {
-            client.release();
-        }
+            return tracking ? event : updated;
+        });
     }
 
-    static async getShipmentByOrderId(orderId, vendorId = null) {
-        try {
-            let query = `SELECT * FROM shipments WHERE order_id = $1`;
-            const values = [orderId];
-
-            if (vendorId) {
-                query += ` AND EXISTS (SELECT 1 FROM orders o WHERE o.id = $2 AND o.vendor_id = $3)`;
-                values.push(orderId, vendorId);
-            }
-
-            const { rows } = await pool.query(query, values);
-            return rows[0] ?? null;
-        } catch (error) {
-            console.error("Error fetching shipment:", error);
-            throw error;
-        }
+    static async addTrackingUpdate(shipmentId, vendorId, data, changedBy = null) {
+        return this.updateShipment(shipmentId, vendorId, data, changedBy, true);
     }
 
-    static async getShipmentById(shipmentId, vendorId = null) {
-        try {
-            let query = `SELECT s.* FROM shipments s`;
-            const values = [shipmentId];
-            let paramIndex = 2;
-
-            if (vendorId) {
-                query += ` JOIN orders o ON o.id = s.order_id WHERE s.id = $1 AND o.vendor_id = $${paramIndex++}`;
-                values.push(vendorId);
-            } else {
-                query += ` WHERE s.id = $1`;
-            }
-
-            const { rows } = await pool.query(query, values);
-            return rows[0] ?? null;
-        } catch (error) {
-            console.error("Error fetching shipment:", error);
-            throw error;
-        }
+    static async getShipmentsByOrderId(orderId, vendorId = null, userId = null) {
+        if (!vendorId && !userId) return [];
+        const { rows } = await pool.query(
+            `SELECT s.*,
+                COALESCE((SELECT json_agg(json_build_object('order_item_id', oi.id, 'product_id', oi.product_id,
+                    'product_name', p.name, 'quantity', oi.quantity, 'variant_id', oi.variant_id) ORDER BY oi.id)
+                 FROM order_items oi LEFT JOIN products p ON p.id = oi.product_id
+                 WHERE oi.order_id = s.order_id AND oi.product_id IS NOT NULL
+                   AND oi.vendor_id = s.vendor_id), '[]'::json) AS items,
+                COALESCE((SELECT json_agg(json_build_object('id', h.id, 'status', h.status, 'location', h.location,
+                    'description', h.description, 'created_at', h.created_at) ORDER BY h.created_at, h.id)
+                 FROM shipment_tracking_history h WHERE h.shipment_id = s.id), '[]'::json) AS tracking_history
+             FROM shipments s JOIN orders o ON o.id = s.order_id
+             WHERE s.order_id = $1 AND ${vendorId ? 's.vendor_id = $2' : 'o.user_id = $2'} ORDER BY s.id`,
+            [orderId, vendorId || userId]
+        );
+        return userId ? rows.map(({ notes, ...shipment }) => shipment) : rows;
     }
 
-    static async getTrackingHistory(shipmentId, vendorId = null) {
-        try {
-            let query = `
-                SELECT sth.*
-                FROM shipment_tracking_history sth
-                JOIN shipments s ON s.id = sth.shipment_id
-            `;
-            const values = [shipmentId];
-            let paramIndex = 2;
-
-            if (vendorId) {
-                query += ` JOIN orders o ON o.id = s.order_id WHERE sth.shipment_id = $1 AND o.vendor_id = $${paramIndex++}`;
-                values.push(vendorId);
-            } else {
-                query += ` WHERE sth.shipment_id = $1`;
-            }
-
-            query += ` ORDER BY sth.created_at DESC`;
-
-            const { rows } = await pool.query(query, values);
-            return rows;
-        } catch (error) {
-            console.error("Error fetching tracking history:", error);
-            throw error;
-        }
+    static async getShipmentByOrderId(orderId, vendorId = null, userId = null) {
+        const shipments = await this.getShipmentsByOrderId(orderId, vendorId, userId);
+        // Preserve the old single-shipment response without silently hiding split shipments.
+        if (shipments.length > 1) throw new CheckoutError('This order has multiple shipments; use the order shipments endpoint', 409);
+        return shipments[0] ?? null;
     }
 
-    static async addTrackingUpdate(shipmentId, vendorId, trackingData) {
-        const client = await pool.connect();
-        try {
-            await client.query('BEGIN');
+    static async getShipmentById(shipmentId, vendorId = null, userId = null) {
+        if (!vendorId && !userId) return null;
+        const { rows } = await pool.query(
+            `SELECT s.* FROM shipments s JOIN orders o ON o.id = s.order_id
+             WHERE s.id = $1 AND ${vendorId ? 's.vendor_id = $2' : 'o.user_id = $2'}`, [shipmentId, vendorId || userId]
+        );
+        if (!rows[0]) return null;
+        if (userId) delete rows[0].notes;
+        return rows[0];
+    }
 
-            // Verify shipment belongs to vendor
-            const { rows: shipmentRows } = await client.query(
-                `SELECT s.id FROM shipments s
-                JOIN orders o ON o.id = s.order_id
-                WHERE s.id = $1 AND o.vendor_id = $2`,
-                [shipmentId, vendorId]
-            );
-
-            if (shipmentRows.length === 0) {
-                return { error: 'Shipment not found', code: 404 };
-            }
-
-            // Insert tracking history
-            const { rows: historyRows } = await client.query(
-                `INSERT INTO shipment_tracking_history
-                (shipment_id, status, location, description)
-                VALUES ($1, $2, $3, $4)
-                RETURNING *`,
-                [
-                    shipmentId,
-                    trackingData.status,
-                    trackingData.location ?? null,
-                    trackingData.description ?? null
-                ]
-            );
-
-            // Update shipment status if provided
-            if (trackingData.status) {
-                await client.query(
-                    `UPDATE shipments SET status = $1, updated_at = NOW() WHERE id = $2`,
-                    [trackingData.status, shipmentId]
-                );
-            }
-
-            await client.query('COMMIT');
-            return historyRows[0];
-        } catch (error) {
-            await client.query('ROLLBACK');
-            console.error("Error adding tracking update:", error);
-            throw error;
-        } finally {
-            client.release();
-        }
+    static async getTrackingHistory(shipmentId, vendorId = null, userId = null) {
+        if (!vendorId && !userId) return [];
+        const { rows } = await pool.query(
+            `SELECT h.id, h.shipment_id, h.status, h.location, h.description, h.created_at
+             FROM shipment_tracking_history h JOIN shipments s ON s.id = h.shipment_id JOIN orders o ON o.id = s.order_id
+             WHERE s.id = $1 AND ${vendorId ? 's.vendor_id = $2' : 'o.user_id = $2'} ORDER BY h.created_at ASC, h.id ASC`,
+            [shipmentId, vendorId || userId]
+        );
+        return rows;
     }
 }
 

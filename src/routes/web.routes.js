@@ -1,3 +1,4 @@
+import * as ReviewController from '#controllers/review.controller.js';
 import * as BookingController from '#controllers/booking.controller.js';
 import { requireCsrfProtection } from '#middlewares/auth.middleware.js';
 import rateLimit from 'express-rate-limit';
@@ -24,6 +25,8 @@ import { authenticated, isCustomer } from '#middlewares/auth.middleware.js';
 import * as PaymentController from '#controllers/payment.controller.js';
 import * as ServicesController from '#controllers/services.controller.js';
 const router = Router();
+
+
 const checkoutLimit = rateLimit({
     windowMs: 60000,
     limit: 10,
@@ -35,6 +38,7 @@ const checkoutLimit = rateLimit({
         message: 'Too many checkout attempts; retry shortly',
     },
 });
+
 const paymentLimit = rateLimit({
     windowMs: 60000,
     limit: 30,
@@ -48,16 +52,12 @@ const paymentLimit = rateLimit({
 });
 
 //support tickets
-router.post(
-    '/support-tickets/create',
-    isCustomer,
-    SupportTicketController.createSupportTicket
-);
-router.patch(
-    '/support-tickets/:ticketId/reply',
-    isCustomer,
-    SupportTicketController.replyToSupportTicket
-);
+router.post('/support-tickets/create', authenticated, requireCsrfProtection, SupportTicketController.createSupportTicket);
+router.get('/support-tickets', authenticated, pagination, SupportTicketController.fetchSupportTickets);
+router.get('/support-tickets/:ticketId', authenticated, SupportTicketController.getSupportTicket);
+router.get('/support-tickets/:ticketId/messages', authenticated, SupportTicketController.fetchTicketMessages);
+router.patch('/support-tickets/:ticketId/reply', authenticated, requireCsrfProtection, SupportTicketController.replyToSupportTicket);
+router.patch('/support-tickets/:ticketId', authenticated, requireCsrfProtection, SupportTicketController.updateSupportTicket);
 
 //settings
 router.get('/settings', pagination, SettingsController.fetchGeneralSettings);
@@ -226,13 +226,17 @@ router.patch(
 );
 
 //shipments
+router.get('/orders/:orderId/shipments', authenticated, isCustomer, ShipmentController.getShipmentsByOrderId);
+router.get('/shipments/:shipmentId', authenticated, isCustomer, ShipmentController.getShipmentById);
 router.get(
     '/orders/:orderId/shipment',
+    authenticated,
     isCustomer,
     ShipmentController.getShipmentByOrderId
 );
 router.get(
     '/shipments/:shipmentId/tracking',
+    authenticated,
     isCustomer,
     ShipmentController.getTrackingHistory
 );
@@ -257,61 +261,23 @@ router.get(
 router.get('/returns/:returnId', isCustomer, ReturnController.getReturnById);
 
 //notifications
-router.get(
-    '/notifications',
-    pagination,
-    isCustomer,
-    NotificationController.getUserNotifications
-);
-router.get(
-    '/notifications/:notificationId',
-    isCustomer,
-    NotificationController.getUserNotification
-);
-router.patch(
-    '/notifications/:notificationId/read',
-    isCustomer,
-    NotificationController.markAsRead
-);
-router.patch(
-    '/notifications/mark-all-read',
-    isCustomer,
-    NotificationController.markAllAsRead
-);
-router.get(
-    '/notifications/unread-count',
-    isCustomer,
-    NotificationController.getUnreadCount
-);
+router.get('/notifications', authenticated, pagination, NotificationController.getUserNotifications);
+router.get('/notifications/unread-count', authenticated, NotificationController.getUnreadCount);
+router.get('/notifications/:notificationId', authenticated, NotificationController.getUserNotification);
+router.patch('/notifications/:notificationId/read', authenticated, requireCsrfProtection, NotificationController.markAsRead);
+router.patch('/notifications/mark-all-read', authenticated, requireCsrfProtection, NotificationController.markAllAsRead);
+
+router.delete('/notifications/:notificationId', authenticated, requireCsrfProtection, NotificationController.deleteNotification);
 
 //profile
 router.get('/profile', authenticated, isCustomer, UsersController.getProfile);
-router.patch(
-    '/profile/update',
-    authenticated,
-    isCustomer,
-    UsersController.updateProfile
-);
+router.patch('/profile/update', authenticated, isCustomer, UsersController.updateProfile);
 
 //address
-router.post(
-    '/address/create',
-    authenticated,
-    isCustomer,
-    UsersController.addAddress
-);
-router.patch(
-    '/address/update/:addressId',
-    authenticated,
-    isCustomer,
-    UsersController.updateAddress
-);
-router.delete(
-    '/address/delete/:addressId',
-    authenticated,
-    isCustomer,
-    UsersController.deleteAddress
-);
+router.post('/address/create', authenticated, isCustomer, UsersController.addAddress);
+router.get('/addresses', authenticated, isCustomer, UsersController.fetchAddresses);
+router.patch('/address/update/:addressId', authenticated, isCustomer, UsersController.updateAddress);
+router.delete('/address/delete/:addressId', authenticated, isCustomer, UsersController.deleteAddress);
 
 //payment
 router.post(
@@ -343,5 +309,15 @@ router.get(
 );
 
 router.get("/vendor/settings/:id", pagination, SettingsController.fetchSettings);
+
+//reviews and ratings
+router.get('/products/:productId/reviews', ReviewController.fetchReviews);
+router.get('/services/:serviceId/reviews', ReviewController.fetchReviews);
+router.post('/products/:productId/reviews', authenticated, isCustomer, requireCsrfProtection, ReviewController.createReview);
+router.post('/services/:serviceId/reviews', authenticated, isCustomer, requireCsrfProtection, ReviewController.createReview);
+router.get('/reviews/mine', authenticated, isCustomer, ReviewController.fetchMyReviews);
+router.get('/reviews/:reviewId', authenticated, isCustomer, ReviewController.viewReview);
+router.patch('/reviews/:reviewId', authenticated, isCustomer, requireCsrfProtection, ReviewController.updateReview);
+router.delete('/reviews/:reviewId', authenticated, isCustomer, requireCsrfProtection, ReviewController.deleteReview);
 
 export default router;

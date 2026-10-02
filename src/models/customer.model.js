@@ -2,107 +2,32 @@ import pool from "#services/pg_pool.js";
 import { ROLES } from "#utils/helpers.js";
 
 class CustomerModel {
-    static async getCustomerByEmail(email, vendor_id) {
-        const { rows } = await pool.query(
-            `SELECT u.*
-            FROM users u
-            WHERE u.email = $1 AND u.vendor_id = $2 AND u.role = $3
-            LIMIT 1`,
-            [email, vendor_id, ROLES.CUSTOMER]
-        );
-        return rows[0] ?? null;
-    }
-
-    static async getCustomerByPhone(phone, vendor_id) {
-        const { rows } = await pool.query(
-            `SELECT u.*
-            FROM users u
-            WHERE u.phone = $1 AND u.vendor_id = $2 AND u.role = $3
-            LIMIT 1`,
-            [phone, vendor_id, ROLES.CUSTOMER]
-        );
-        return rows[0] ?? null;
-    }
-
-    static async getCustomerById(user_id, vendor_id) {
-        const { rows } = await pool.query(
-            `SELECT u.*
-            FROM users u
-            WHERE u.id = $1 AND u.vendor_id = $2 AND u.role = $3
-            LIMIT 1`,
-            [user_id, vendor_id, ROLES.CUSTOMER]
-        );
-        return rows[0] ?? null;
-    }
-
-    static async createCustomer({ vendor_id, email, password, firstname, lastname, phone }) {
-        const client = await pool.connect();
-        try {
-            await client.query('BEGIN');
-
-            // User may already exist globally (same person, different vendor)
-            const { rows: existing } = await client.query(
-                `SELECT id FROM users WHERE email = $1 AND role = ${ROLES.CUSTOMER} LIMIT 1`,
-                [email]
-            );
-
-            let user_id;
-            if (existing[0]) {
-                user_id = existing[0].id;
-            } else {
-                const { rows: userRows } = await client.query(
-                    `INSERT INTO users (email, password, firstname, lastname, phone, role)
-                    VALUES ($1, $2, $3, $4, $5, ${ROLES.CUSTOMER})
-                    RETURNING id`,
-                    [email, password, firstname, lastname, phone ?? null]
-                );
-                user_id = userRows[0].id;
-            }
-
-            await client.query('COMMIT');
-
-            const { rows } = await client.query(
-                `SELECT u.id, u.email, u.firstname, u.lastname,
-                u.role, u.status, u.email_verified, vc.vendor_id
-                FROM users u
-                INNER JOIN vendor_customers vc ON vc.user_id = u.id
-                WHERE u.id = $1 AND vc.vendor_id = $2`,
-                [user_id, vendor_id]
-            );
-            return rows[0];
-        } catch (err) {
-            await client.query('ROLLBACK');
-            throw err;
-        } finally {
-            client.release();
-        }
-    }
-
     static async getProfile(userId) {
         try {
             const { rows } = await pool.query(
                 `SELECT
                     u.id, u.firstname, u.lastname, u.email,
                     u.phone, u.role, u.status,
-                    ui.avatar, ui.gender, ui.date_of_birth,
-                    ui.city, ui.state, ui.country_id,
+                    ui.avatar, ui.gender, ui.dob,
+                    ui.city, ui.state, ui.country,
                     u.created_at,
                     json_agg(DISTINCT jsonb_build_object(
-                        'id', ua.id,
-                        'firstname', ua.firstname,
-                        'lastname', ua.lastname,
-                        'phone', ua.phone,
-                        'address', ua.address,
-                        'city', ua.city,
-                        'state', ua.state,
-                        'country', ua.country,
-                        'zip_code', ua.zip_code,
-                        'is_default', ua.is_default
-                    )) FILTER (WHERE ua.id IS NOT NULL) AS addresses
+                        'id', sa.id,
+                        'firstname', sa.firstname,
+                        'lastname', sa.lastname,
+                        'phone_one', sa.phone_one,
+                        'phone_two', sa.phone_two,
+                        'address', sa.address,
+                        'city', sa.city,
+                        'state', sa.state,
+                        'country', sa.country,
+                        'zip_code', sa.zip_code,
+                        'is_default', sa.is_default
+                    )) FILTER (WHERE sa.id IS NOT NULL) AS addresses
                 FROM users u
                 LEFT JOIN users_info ui ON ui.user_id = u.id
-                LEFT JOIN user_addresses ua ON ua.user_id = u.id
-                WHERE u.id = $1 AND u.deleted_at IS NULL
+                LEFT JOIN shipping_addresses sa ON sa.user_id = u.id
+                WHERE u.id = $1
                 GROUP BY u.id, ui.id`,
                 [userId]
             );
@@ -119,7 +44,7 @@ class CustomerModel {
         try {
             await client.query('BEGIN');
 
-            const { firstname, lastname, phone, gender, date_of_birth, avatar } = data;
+            const { firstname, lastname, phone, gender, dob, avatar } = data;
 
             // Upload avatar to S3 if provided
             const avatarUrl = avatar
@@ -141,14 +66,14 @@ class CustomerModel {
 
             // Upsert users_info table
             await client.query(
-                `INSERT INTO users_info (user_id, avatar, gender, date_of_birth)
+                `INSERT INTO users_info (user_id, avatar, gender, dob)
                 VALUES ($1, $2, $3, $4)
                 ON CONFLICT (user_id) DO UPDATE SET
                     avatar          = COALESCE(EXCLUDED.avatar, users_info.avatar),
                     gender          = COALESCE(EXCLUDED.gender, users_info.gender),
-                    date_of_birth   = COALESCE(EXCLUDED.date_of_birth, users_info.date_of_birth),
+                    dob   = COALESCE(EXCLUDED.dob, users_info.dob),
                     updated_at      = NOW()`,
-                [userId, avatarUrl, gender ?? null, date_of_birth ?? null]
+                [userId, avatarUrl, gender ?? null, dob ?? null]
             );
 
             await client.query('COMMIT');
@@ -168,7 +93,7 @@ class CustomerModel {
         try {
             await client.query('BEGIN');
 
-            const { firstname, lastname, phone_one, phone_two, address, city, state, country_id, zip_code, is_default } = data;
+            const { firstname, lastname, phone_one, phone_two, address, city, state, country_id, country, zip_code, is_default } = data;
 
             // If new address is default unset others
             if (is_default) {
@@ -184,19 +109,19 @@ class CustomerModel {
                 [userId]
             );
 
-            // Max 2 addresses per user
-            if (existing.length >= 2) {
-                return { error: 'Maximum of 2 addresses allowed', code: 422 };
+            // Max 5 addresses per user
+            if (existing.length >= 5) {
+                return { error: 'Maximum of 5 addresses allowed', code: 422 };
             }
 
             const setDefault = is_default || existing.length === 0;
 
             const { rows } = await client.query(
                 `INSERT INTO shipping_addresses
-                (user_id, firstname, lastname, phone_one, phone_two, address, city, state, country_id, zip_code, is_default)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                (user_id, firstname, lastname, phone_one, phone_two, address, city, state, country_id, country, zip_code, is_default)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
                 RETURNING *`,
-                [userId, firstname, lastname, phone_one, phone_two, address, city, state, country_id, zip_code ?? null, setDefault]
+                [userId, firstname, lastname, phone_one, phone_two, address, city, state, country_id, country, zip_code ?? null, setDefault]
             );
 
             await client.query('COMMIT');
@@ -217,7 +142,7 @@ class CustomerModel {
 
             // Verify address belongs to user
             const { rows: existing } = await client.query(
-                `SELECT id FROM user_addresses WHERE id = $1 AND user_id = $2`,
+                `SELECT id FROM shipping_addresses WHERE id = $1 AND user_id = $2`,
                 [addressId, userId]
             );
 
@@ -228,33 +153,42 @@ class CustomerModel {
             // If updating to default unset others
             if (data.is_default) {
                 await client.query(
-                    `UPDATE user_addresses SET is_default = false WHERE user_id = $1`,
+                    `UPDATE shipping_addresses SET is_default = false WHERE user_id = $1`,
                     [userId]
                 );
             }
 
             const { rows } = await client.query(
-                `UPDATE user_addresses SET
-                    firstname   = COALESCE($1, firstname),
-                    lastname    = COALESCE($2, lastname),
-                    phone_one       = COALESCE($3, phone_one),
-                    phone_two       = COALESCE($4, phone_two),
-                    address     = COALESCE($5, address),
-                    city        = COALESCE($6, city),
-                    state       = COALESCE($7, state),
-                    country_id     = COALESCE($8, country_id),
-                    zip_code    = COALESCE($9, zip_code),
-                    is_default  = COALESCE($9, is_default),
-                    updated_at  = NOW()
-                WHERE id = $10 AND user_id = $11
-                RETURNING *`,
+                `UPDATE shipping_addresses SET
+                firstname   = COALESCE($1, firstname),
+                lastname    = COALESCE($2, lastname),
+                phone_one   = COALESCE($3, phone_one),
+                phone_two   = COALESCE($4, phone_two),
+                address     = COALESCE($5, address),
+                city        = COALESCE($6, city),
+                state       = COALESCE($7, state),
+                country_id  = COALESCE($8, country_id),
+                country     = COALESCE($9, country),
+                zip_code    = COALESCE($10, zip_code),
+                is_default  = COALESCE($11, is_default),
+                updated_at  = NOW()
+            WHERE id = $12
+            AND user_id = $13
+            RETURNING *`,
                 [
-                    data.firstname ?? null, data.lastname ?? null,
-                    data.phone ?? null, data.address ?? null,
-                    data.city ?? null, data.state ?? null,
-                    data.country ?? null, data.zip_code ?? null,
-                    data.is_default ?? null,
-                    addressId, userId, vendorId
+                    data.firstname ?? null,       // $1
+                    data.lastname ?? null,        // $2
+                    data.phone ?? null,           // $3
+                    data.phone_two ?? null,       // $4
+                    data.address ?? null,         // $5
+                    data.city ?? null,            // $6
+                    data.state ?? null,           // $7
+                    data.country_id ?? null,      // $8
+                    data.country ?? null,         // $9
+                    data.zip_code ?? null,        // $10
+                    data.is_default ?? null,      // $11
+                    addressId,                    // $12
+                    userId                        // $13
                 ]
             );
 
@@ -269,7 +203,7 @@ class CustomerModel {
         }
     }
 
-    static async deleteAddress(userId, vendorId, addressId) {
+    static async deleteAddress(userId, addressId) {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
@@ -277,7 +211,7 @@ class CustomerModel {
             // Verify address belongs to user
             const { rows: existing } = await client.query(
                 `SELECT * FROM shipping_addresses WHERE id = $1 AND user_id = $2`,
-                [addressId, userId, vendorId]
+                [addressId, userId]
             );
 
             if (existing.length === 0) {
@@ -288,7 +222,7 @@ class CustomerModel {
 
             await client.query(
                 `DELETE FROM shipping_addresses WHERE id = $1 AND user_id = $2`,
-                [addressId, userId, vendorId]
+                [addressId, userId]
             );
 
             // If deleted address was default set another as default
@@ -335,8 +269,8 @@ class CustomerModel {
 
             // Verify address belongs to user
             const { rows: existing } = await client.query(
-                `SELECT id FROM user_addresses WHERE id = $1 AND user_id = $2 AND vendor_id = $3`,
-                [addressId, userId, vendorId]
+                `SELECT id FROM shipping_addresses WHERE id = $1 AND user_id = $2`,
+                [addressId, userId]
             );
 
             if (existing.length === 0) {
@@ -345,16 +279,16 @@ class CustomerModel {
 
             // Unset all defaults
             await client.query(
-                `UPDATE user_addresses SET is_default = false WHERE user_id = $1 AND vendor_id = $2`,
-                [userId, vendorId]
+                `UPDATE shipping_addresses SET is_default = false WHERE user_id = $1`,
+                [userId]
             );
 
             // Set new default
             const { rows } = await client.query(
-                `UPDATE user_addresses SET is_default = true
-                WHERE id = $1 AND user_id = $2 AND vendor_id = $3
+                `UPDATE shipping_addresses SET is_default = true
+                WHERE id = $1 AND user_id = $2
                 RETURNING *`,
-                [addressId, userId, vendorId]
+                [addressId, userId]
             );
 
             await client.query('COMMIT');

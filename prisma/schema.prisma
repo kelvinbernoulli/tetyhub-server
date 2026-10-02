@@ -89,6 +89,7 @@ model users {
   activity_logs             activity_logs[]
   support_tickets           support_tickets[]
   support_ticket_replies    support_ticket_replies[]
+  assigned_support_tickets  support_tickets[]        @relation("SupportAssignee")
   shipping_addresses        shipping_addresses[]
   admin                     admins?                  @relation("AdminUser")
   admin_assignments_created admins[]                 @relation("AdminCreatedBy")
@@ -105,6 +106,8 @@ model users_info {
   user_id     Int       @unique
   avatar      String?
   phone       String?
+  gender      String?
+  dob         String?
   address     String?
   city        String?
   state       String?
@@ -122,12 +125,13 @@ model users_info {
 // ===============================================
 
 model vendors {
-  id         Int       @id @default(autoincrement())
-  user_id    Int       @unique
-  verification_status  String    @default("pending") // pending, verified, rejected
-  status               String    @default("active") // active, inactive, suspended
-  created_at DateTime  @default(now())
-  updated_at DateTime? @updatedAt
+  shipments shipments[]
+  id                  Int       @id @default(autoincrement())
+  user_id             Int       @unique
+  verification_status String    @default("pending") // pending, verified, rejected
+  status              String    @default("active") // active, inactive, suspended
+  created_at          DateTime  @default(now())
+  updated_at          DateTime? @updatedAt
 
   users            users              @relation(fields: [user_id], references: [id], onDelete: Cascade)
   products         products[]
@@ -577,7 +581,7 @@ model order_items {
 model shipping_addresses {
   country_id Int?
   id         Int       @id @default(autoincrement())
-  order_id   Int
+  order_id   Int?
   user_id    Int
   firstname  String
   lastname   String
@@ -594,12 +598,14 @@ model shipping_addresses {
 
   // Relations
   user   users  @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  orders orders @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  orders orders? @relation(fields: [order_id], references: [id], onDelete: Cascade)
 
   @@index([user_id])
 }
 
 model payments {
+  booking_id Int? @unique
+  booking service_bookings? @relation(fields: [booking_id], references: [id], onDelete: Restrict)
   events             payment_events[]
   provider_ref       String?          @unique
   checkout_data      String?
@@ -663,7 +669,9 @@ model coupons {
 
 model shipments {
   id                 Int       @id @default(autoincrement())
-  order_id           Int       @unique
+  order_id           Int
+  vendor_id          Int?
+  vendor             vendors? @relation(fields: [vendor_id], references: [id])
   tracking_number    String?
   carrier            String?
   shipping_method    String?
@@ -678,9 +686,13 @@ model shipments {
   // Relations
   order            orders                      @relation(fields: [order_id], references: [id], onDelete: Cascade)
   tracking_history shipment_tracking_history[]
+
+  @@unique([order_id, vendor_id])
+  @@index([vendor_id])
 }
 
 model shipment_tracking_history {
+  changed_by Int?
   id          Int       @id @default(autoincrement())
   shipment_id Int
   status      String
@@ -691,6 +703,8 @@ model shipment_tracking_history {
 
   // Relations
   shipment shipments @relation(fields: [shipment_id], references: [id], onDelete: Cascade)
+
+  @@index([shipment_id, created_at, id])
 }
 
 model returns {
@@ -705,6 +719,12 @@ model returns {
   status        String    @default("pending") // pending, approved, rejected, shipped, received, completed
   created_at    DateTime  @default(now())
   updated_at    DateTime? @updatedAt
+
+  vendor_notes String?
+  admin_notes  String?
+  evidence     Json?
+  approved_at  DateTime?
+  completed_at DateTime?
 
   // Relations
   order             orders           @relation(fields: [order_id], references: [id])
@@ -723,6 +743,8 @@ model return_items {
   created_at    DateTime  @default(now())
   updated_at    DateTime? @updatedAt
 
+  condition String?
+
   // Relations
   return     returns     @relation(fields: [return_id], references: [id], onDelete: Cascade)
   order_item order_items @relation(fields: [order_item_id], references: [id])
@@ -740,6 +762,9 @@ model reviews {
   service_id        Int?
   user_id           Int
   order_id          Int?
+  booking_id        Int?
+  revision          Int       @default(1)
+  moderation_note   String?
   rating            Int       @default(5)
   title             String?
   comment           String?
@@ -753,6 +778,13 @@ model reviews {
   product products? @relation(fields: [product_id], references: [id], onDelete: Cascade)
   service services? @relation(fields: [service_id], references: [id], onDelete: Cascade)
   user    users     @relation(fields: [user_id], references: [id])
+  booking service_bookings? @relation(fields: [booking_id], references: [id], onDelete: SetNull)
+
+  @@unique([user_id, product_id])
+  @@unique([user_id, service_id])
+  @@index([product_id, status, id])
+  @@index([service_id, status, id])
+  @@index([status, id])
 }
 
 // ===============================================
@@ -764,8 +796,10 @@ model support_tickets {
   ticket_number String    @unique
   subject       String
   category      String?
-  priority      String    @default("normal") // low, normal, high, urgent
-  status        String    @default("open") // open, in_progress, resolved, closed, reopened
+  priority      String    @default("medium") // low, medium, high
+  status        String    @default("open") // open, in_progress, waiting_on_user, resolved
+  assigned_to   Int?
+  assignee      users?    @relation("SupportAssignee", fields: [assigned_to], references: [id], onDelete: SetNull)
   user_id       Int?
   vendor_id     Int?
   created_at    DateTime  @default(now())
@@ -777,20 +811,26 @@ model support_tickets {
   replies           support_ticket_replies[]
   vendorSettings    vendor_settings?         @relation(fields: [vendor_settingsId], references: [id])
   vendor_settingsId Int?
+
+  @@index([user_id, created_at])
+  @@index([assigned_to, status])
 }
 
 model support_ticket_replies {
-  id         Int       @id @default(autoincrement())
-  ticket_id  Int
-  user_id    Int
-  message    String
-  attachment String?
-  created_at DateTime  @default(now())
-  updated_at DateTime? @updatedAt
+  id          Int       @id @default(autoincrement())
+  ticket_id   Int
+  user_id     Int
+  message     String
+  attachment  String?
+  is_internal Boolean   @default(false)
+  created_at  DateTime  @default(now())
+  updated_at  DateTime? @updatedAt
 
   // Relations
   ticket support_tickets @relation(fields: [ticket_id], references: [id], onDelete: Cascade)
   user   users           @relation(fields: [user_id], references: [id])
+
+  @@index([ticket_id, id])
 }
 
 model notifications {
@@ -806,6 +846,9 @@ model notifications {
 
   // Relations
   user users @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id, id])
+  @@index([user_id, read_at])
 }
 
 model activity_logs {
@@ -959,6 +1002,8 @@ model services {
 }
 
 model service_bookings {
+  payment payments?
+  reviews reviews[]
   id                        Int       @id @default(autoincrement())
   service_id                Int       @map("service_id")
   vendor_id                 Int       @map("vendor_id")
@@ -1039,4 +1084,14 @@ model checkout_notifications {
   delivered_at DateTime?
 
   order orders @relation(fields: [order_id], references: [id], onDelete: Cascade)
+}
+
+model faq {
+  id         Int       @id @default(autoincrement())
+  user_id    Int?
+  question   String
+  answer     String
+  status     Boolean   @default(true)
+  created_at DateTime  @default(now())
+  updated_at DateTime?
 }

@@ -1,3 +1,4 @@
+import { notifyOrder, notifyPaymentFailure } from '#services/notifications.js';
 import BookingPayment from '#models/booking-payment.model.js';
 import { randomUUID } from 'node:crypto';
 import pool from '#services/pg_pool.js';
@@ -234,10 +235,7 @@ export class Payment {
                 };
             if (!success) {
                 // Pending and failed attempts never downgrade a paid order or close a reusable intent.
-                await client.query(
-                    'UPDATE payments SET meta = $1, updated_at = NOW() WHERE id = $2',
-                    [JSON.stringify({ status: data.status }), payment.id]
-                );
+                await notifyPaymentFailure(client, payment, data.status, { order_id: order.id, payment_id: payment.id });
                 return {
                     order_id: order.id,
                     payment_status: order.payment_status,
@@ -270,6 +268,7 @@ export class Payment {
                     'INSERT INTO checkout_notifications (order_id) VALUES ($1) ON CONFLICT (order_id) DO NOTHING',
                     [order.id]
                 );
+            await notifyOrder(client, order, status);
             return { order_id: order.id, payment_status: 'paid', status };
         });
     }

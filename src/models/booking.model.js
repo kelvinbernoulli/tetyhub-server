@@ -1,3 +1,4 @@
+import { notifyBooking } from '#services/notifications.js';
 import { createHash, randomUUID } from 'node:crypto';
 import pool from '#services/pg_pool.js';
 import {
@@ -13,8 +14,11 @@ import {
 } from '#utils/booking.js';
 
 export async function expireBookings(client = pool) {
-    return client.query(`UPDATE service_bookings SET booking_status = 'expired', updated_at = NOW()
-        WHERE booking_status = 'pending' AND payment_status = 'unpaid' AND reservation_expires_at <= NOW()`);
+    if (client === pool) return transaction(pool, (connection) => expireBookings(connection));
+    const result = await client.query(`UPDATE service_bookings SET booking_status = 'expired', updated_at = NOW()
+        WHERE booking_status = 'pending' AND payment_status = 'unpaid' AND reservation_expires_at <= NOW() RETURNING *`);
+    for (const booking of result.rows) await notifyBooking(client, booking, 'expired', { vendors: false });
+    return result;
 }
 
 export async function availableService(client, id, lock = false) {
@@ -159,6 +163,7 @@ export default class Booking {
                     data.note ?? null,
                 ]
             );
+            await notifyBooking(client, rows[0], 'pending', { vendors: false });
             return rows[0];
         });
     }
@@ -237,16 +242,7 @@ export default class Booking {
                     [target, reason ?? null, refund, id]
                 )
             ).rows[0];
-            await client.query(
-                `INSERT INTO notifications (user_id,type,title,message,metadata)
-                VALUES ($1,'booking',$2,$3,$4)`,
-                [
-                    booking.user_id,
-                    'Booking updated',
-                    `Your booking for ${booking.service_name} is ${target}.`,
-                    JSON.stringify({ booking_id: id }),
-                ]
-            );
+            await notifyBooking(client, booking, target);
             return updated;
         });
     }

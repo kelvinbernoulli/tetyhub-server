@@ -1,4 +1,5 @@
 import Joi from "joi";
+import { shipmentTransitions } from "#services/shipment.js";
 
 export const orderSchema = Joi.object({
     note: Joi.string().trim().max(500).optional().label("Order Note"),
@@ -27,6 +28,7 @@ export const cancelOrderSchema = Joi.object({
 });
 
 export const createShipmentSchema = Joi.object({
+    location: Joi.string().trim().max(255).optional().label("Location"),
     tracking_number: Joi.string().trim().max(100).required().label("Tracking Number"),
     carrier: Joi.string().trim().max(100).required().label("Carrier"),
     shipping_method: Joi.string().trim().max(100).optional().label("Shipping Method"),
@@ -41,14 +43,14 @@ export const updateShipmentSchema = Joi.object({
     shipping_method: Joi.string().trim().max(100).optional().label("Shipping Method"),
     estimated_delivery: Joi.date().optional().label("Estimated Delivery Date"),
     shipping_cost: Joi.number().min(0).optional().label("Shipping Cost"),
-    status: Joi.string().valid('pending', 'shipped', 'in_transit', 'delivered', 'failed').optional().label("Shipment Status"),
+    status: Joi.string().valid(...Object.keys(shipmentTransitions)).optional().label("Shipment Status"),
     notes: Joi.string().trim().max(500).optional().label("Notes"),
     location: Joi.string().trim().max(255).optional().label("Location"),
     tracking_description: Joi.string().trim().max(500).optional().label("Tracking Description"),
-});
+}).min(1);
 
 export const addTrackingUpdateSchema = Joi.object({
-    status: Joi.string().valid('pending', 'processing', 'shipped', 'in_transit', 'out_for_delivery', 'delivered', 'returned', 'cancelled', 'failed').required().label("Status"),
+    status: Joi.string().valid(...Object.keys(shipmentTransitions)).required().label("Status"),
     location: Joi.string().trim().max(255).optional().label("Location"),
     description: Joi.string().trim().max(500).optional().label("Description"),
 });

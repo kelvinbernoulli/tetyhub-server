@@ -115,11 +115,14 @@ async function validateRelations(client, data) {
     );
     if (!currency.rows.length) throw serviceError('Invalid currency');
 }
-const RELATED_FIELDS = `v.store_name AS vendor_name, c.name AS category_name,
+const RELATED_FIELDS = `vs.store_name AS vendor_name, c.name AS category_name,
     sc.name AS subcategory_name, cc.name AS childcategory_name,
-    cur.code AS currency, cur.code AS currency_code, cur.name AS currency_name`;
+    cur.code AS currency, cur.code AS currency_code, cur.name AS currency_name,
+    (SELECT ROUND(AVG(r.rating), 1) FROM reviews r WHERE r.service_id = s.id AND r.status = 'approved') AS avg_rating,
+    (SELECT COUNT(*)::integer FROM reviews r WHERE r.service_id = s.id AND r.status = 'approved') AS review_count`;
 const SELECT = `SELECT s.*, ${RELATED_FIELDS}
     FROM services s LEFT JOIN vendors v ON v.id = s.vendor_id
+    LEFT JOIN vendor_settings vs ON vs.vendor_id = s.vendor_id
     LEFT JOIN currencies cur ON cur.id = s.currency_id
     LEFT JOIN categories c ON c.id = s.category_id
     LEFT JOIN subcategories sc ON sc.id = s.subcategory_id

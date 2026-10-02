@@ -1,3 +1,4 @@
+import * as ReviewController from '#controllers/review.controller.js';
 import * as supportTicketsController from "#controllers/support.ticket.controller.js";
 import * as settingsController from "#controllers/settings.controller.js";
 import * as CountriesController from "#controllers/countries.controller.js";
@@ -10,6 +11,7 @@ import * as ReturnController from "#controllers/return.controller.js";
 import * as CategoriesController from '#controllers/categories.controller.js'
 import * as SubcategoriesController from '#controllers/subcategories.controller.js'
 import * as ChildcategoriesController from '#controllers/childcategories.controller.js'
+import * as FAQController from '#controllers/faq.controller.js'
 import pagination from "#middlewares/pagination.middleware.js";
 import { Router } from "express";
 import { authenticated, canCreate, canDelete, canRead, canUpdate, isAllAdmin, isSuperAdmin, requireCsrfProtection, requireRecentAuthentication } from "#middlewares/auth.middleware.js";
@@ -90,5 +92,18 @@ router.get("/transactions", canRead('transactions'), pagination, TransactionHist
 //returns
 router.get("/returns", canRead('returns'), pagination, ReturnController.getAllReturns);
 router.patch("/returns/:returnId", canUpdate('returns'), ReturnController.adminUpdateReturn);
+
+//faq
+router.post("/faq/create", FAQController.createFAQ);
+router.get("/faqs", pagination, FAQController.fetchFAQ);
+router.patch("/faq/update/:faqId", FAQController.updateFAQ);
+router.delete("/faq/delete/:faqId", FAQController.deleteFAQ);
+
+
+//reviews and ratings
+router.get('/reviews', canRead('reviews'), ReviewController.fetchAdminReviews);
+router.get('/reviews/:reviewId', canRead('reviews'), ReviewController.viewAdminReview);
+router.patch('/reviews/:reviewId/status', canRead('reviews'), canUpdate('reviews'), ReviewController.moderateReview);
+router.delete('/reviews/:reviewId', canRead('reviews'), canDelete('reviews'), ReviewController.deleteAdminReview);
 
 export default router;

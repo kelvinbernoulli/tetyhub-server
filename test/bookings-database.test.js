@@ -90,6 +90,7 @@ test(
             } finally {
                 client.release();
             }
+            await db.query(await readFile(new URL('./fixtures/notification-recipients.sql', import.meta.url), 'utf8'));
             t.mock.method(pool, 'connect', () => db.connect());
             t.mock.method(pool, 'query', (...args) => db.query(...args));
             const request = {

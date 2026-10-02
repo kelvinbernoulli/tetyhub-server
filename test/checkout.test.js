@@ -115,6 +115,8 @@ test('variant checkout reserves and releases only the selected SKU', async (t) =
                 rows: [
                     {
                         id: 5,
+                        user_id: 1,
+                        status: 'pending',
                         total: '20.50',
                         payment_status: 'unpaid',
                         payment_method: 'paystack',
@@ -363,6 +365,11 @@ test('zero-total checkout confirms without contacting a gateway', async (t) => {
         { id: 1 },
         { ...input(), expected_total: 0 }
     );
+    const history = calls.filter(x => x.sql.startsWith('INSERT INTO order_status_history'));
+    assert.equal(history.length, 2);
+    assert.match(history[0].sql, /'pending'/);
+    assert.match(history[1].sql, /'processing'/);
+    assert.deepEqual(history[1].values, [5, 1]);
     assert.equal(result.payment_status, 'paid');
     assert.ok(
         calls.some((x) =>

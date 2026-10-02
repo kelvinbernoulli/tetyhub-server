@@ -265,7 +265,10 @@ export const getOrderHistory = async (req, res) => {
         }
 
         const { orderId } = params;
-        const history = await Order.fetchOrderHistory(orderId, user.id);
+        if (!req.auth?.vendorId) {
+            return respondWithError(res, 403, 'Forbidden', ERROR_CODES.FORBIDDEN);
+        }
+        const history = await Order.fetchOrderHistory(orderId, null, req.auth.vendorId);
 
         return respondWithSuccess(
             res,

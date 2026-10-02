@@ -1,3 +1,5 @@
+import Notification from '#models/notification.model.js';
+import { transaction } from '#utils/checkout.js';
 import Auth from "#models/auth.model.js";
 import UserModel from "#models/user.model.js";
 import {
@@ -87,15 +89,15 @@ export const verifyEmail = async (req, res) => {
 
         const emailVerifyToken = crypto.randomBytes(20).toString("hex");
 
-        await pool.query(
-            `UPDATE users
-            SET email_verified = true,
-                email_verification_token = $1,
-                email_verified_at = NOW(),
-                status = 'active'
-            WHERE email = $2`,
-            [emailVerifyToken, email]
-        );
+        await transaction(pool, async (client) => {
+            const { rows } = await client.query(
+                `UPDATE users SET email_verified = true, email_verification_token = $1,
+                 email_verified_at = NOW(), status = 'active'
+                 WHERE email = $2 AND email_verified = false RETURNING id`, [emailVerifyToken, email]
+            );
+            if (rows[0]) await Notification.createNotification(rows[0].id, 'account', 'Email verified',
+                'Your email address has been verified.', null, client);
+        });
 
         await redisClient.del(redisKey);
 
@@ -292,12 +294,14 @@ export const confirmPasswordReset = async (req, res) => {
 
         const hashpassword = await passwordHash(new_password);
 
-        await pool.query(
-            `UPDATE users
-            SET password = $1
-            WHERE email = $2`,
-            [hashpassword, email]
-        );
+        await transaction(pool, async (client) => {
+            await client.query(
+                `UPDATE users SET password = $1, auth_version = auth_version + 1
+                 WHERE id = $2`, [hashpassword, user.id]
+            );
+            await Notification.createNotification(user.id, 'security', 'Password changed',
+                'Your account password was changed. Contact support if you did not make this change.', null, client);
+        });
 
         await redisClient.del(redisKey);
 

@@ -11,7 +11,7 @@ var transporter = nodemailer.createTransport({
 
 async function sendEmail(email, subject, html) {
     const mailOptions = {
-        from: "no-reply@sportx.com",
+        from: "no-reply@tetyhub.com",
         to: email,
         subject: subject,
         html: html,

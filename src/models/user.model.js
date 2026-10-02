@@ -1,3 +1,4 @@
+import Notification from '#models/notification.model.js';
 import pool from "#services/pg_pool.js";
 import { ROLES } from "#utils/helpers.js";
 import { select_column_by_key } from "./query.model.js";
@@ -103,6 +104,7 @@ export class UserModel {
                 user.vendor = vendorResult.rows[0];
             }
 
+            await Notification.createNotification(user.id, 'account', 'Welcome to Tetyhub', 'Your account has been created. Complete email verification to get started.', null, client);
             await client.query('COMMIT');
 
             const { password, ...safeUser } = user;

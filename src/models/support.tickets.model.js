@@ -1,124 +1,78 @@
-import pool from "#services/pg_pool.js";
+import pool from '#services/pg_pool.js';
 
 export default class SupportTicket {
-
-    // Pass client for transactional context, pool otherwise
-    static async create(client, vendorId = null, data) {
-        const { subject, priority, ticketNumber, userId, category } = data;
-
+    static async create(client, vendorId, data) {
         const result = await client.query(
             `INSERT INTO support_tickets
                 (subject, priority, status, vendor_id, ticket_number, user_id, category)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)
-             RETURNING *`,
-            [subject, priority, 'open', vendorId, ticketNumber, userId, category]
+             VALUES ($1, $2, 'open', $3, $4, $5, $6) RETURNING *`,
+            [
+                data.subject,
+                data.priority,
+                vendorId,
+                data.ticketNumber,
+                data.userId,
+                data.category,
+            ]
         );
-
         return result.rows[0];
     }
 
-    static async findById(ticketId, vendorId = null) {
-        console.log('Finding ticket by ID:', { ticketId, vendorId });
-        const conditions = [`t.id = $1`];
-        const params     = [ticketId];
-
-        if (vendorId) {
-            conditions.push(`t.vendor_id = $2`);
-            params.push(vendorId);
-        }
-
-        const result = await pool.query(
-            `SELECT
-                t.*,
-                COALESCE(
-                    JSON_AGG(
-                        JSON_BUILD_OBJECT(
-                            'id',          r.id,
-                            'message',     r.message,
-                            'attachment', r.attachment,
-                            'user_id',     r.user_id,
-                            'created_at',  r.created_at
-                        ) ORDER BY r.created_at ASC
-                    ) FILTER (WHERE r.id IS NOT NULL),
-                    '[]'::json
-                ) AS replies
-             FROM support_tickets t
-             LEFT JOIN support_ticket_replies r ON r.ticket_id = t.id
-             WHERE ${conditions.join(' AND ')}
-             GROUP BY t.id
-             LIMIT 1`,
-            params
+    static async findById(ticketId, actor, client = pool, lock = false) {
+        const result = await client.query(
+            `SELECT * FROM support_tickets WHERE id = $1
+             AND ($2::boolean OR user_id = $3) ${lock ? 'FOR UPDATE' : ''}`,
+            [ticketId, actor.supportStaff, actor.userId]
         );
-
         return result.rows[0] ?? null;
     }
 
-    static async findAll(vendorId, offset = 0, limit = 20, filters = {}) {
-        const params  = [vendorId];
-        const where   = [`t.vendor_id = $1`];
-        let   index   = 2;
-
-        if (filters.status) {
-            where.push(`t.status = $${index++}`);
-            params.push(filters.status);
+    static async findAll(actor, offset = 0, limit = 20, filters = {}) {
+        const params = [actor.supportStaff, actor.userId];
+        const where = ['($1::boolean OR t.user_id = $2)'];
+        for (const field of ['status', 'priority', 'category', 'assigned_to']) {
+            if (filters[field] !== undefined) {
+                params.push(filters[field]);
+                where.push(`t.${field} = $${params.length}`);
+            }
         }
-
-        if (filters.priority) {
-            where.push(`t.priority = $${index++}`);
-            params.push(filters.priority);
+        if (filters.search) {
+            params.push(`%${filters.search}%`);
+            where.push(
+                `(t.subject ILIKE $${params.length} OR t.ticket_number ILIKE $${params.length})`
+            );
         }
-
-        if (filters.search?.trim()) {
-            where.push(`t.subject ILIKE $${index++}`);
-            params.push(`%${filters.search.trim()}%`);
-        }
-
-        const safeLimit  = Math.min(Math.max(Number(limit)  || 20, 1), 100);
-        const safeOffset = Math.max(Number(offset) || 0, 0);
-
-        const [dataResult, countResult] = await Promise.all([
+        const [data, count] = await Promise.all([
             pool.query(
-                `SELECT t.*,
-                    (SELECT COUNT(*) FROM support_ticket_replies r WHERE r.ticket_id = t.id) AS reply_count
-                 FROM support_tickets t
-                 WHERE ${where.join(' AND ')}
-                 ORDER BY t.created_at DESC
-                 LIMIT $${index++} OFFSET $${index++}`,
-                [...params, safeLimit, safeOffset]
+                `SELECT t.*, (SELECT COUNT(*)::integer FROM support_ticket_replies r
+                    WHERE r.ticket_id = t.id AND ($1::boolean OR NOT r.is_internal)) AS reply_count
+                 FROM support_tickets t WHERE ${where.join(' AND ')}
+                 ORDER BY COALESCE(t.updated_at, t.created_at) DESC, t.id DESC
+                 LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+                [...params, limit, offset]
             ),
             pool.query(
-                `SELECT COUNT(*)::INTEGER AS total
-                 FROM support_tickets t
-                 WHERE ${where.join(' AND ')}`,
+                `SELECT COUNT(*)::integer AS total FROM support_tickets t WHERE ${where.join(' AND ')}`,
                 params
             ),
         ]);
-
-        return {
-            total:  countResult.rows[0].total,
-            limit:  safeLimit,
-            offset: safeOffset,
-            rows:   dataResult.rows,
-        };
+        return { total: count.rows[0].total, limit, offset, rows: data.rows };
     }
 
-    static async updateStatus(ticketId, status, vendorId = null) {
-        const conditions = [`id = $1`];
-        const params     = [ticketId, status];
-
-        if (vendorId) {
-            conditions.push(`vendor_id = $3`);
-            params.push(vendorId);
-        }
-
-        const result = await pool.query(
-            `UPDATE support_tickets
-             SET status = $2, updated_at = NOW()
-             WHERE ${conditions.join(' AND ')}
-             RETURNING *`,
-            params
+    static async update(client, ticketId, data) {
+        const fields = ['status', 'priority', 'assigned_to'].filter(
+            (field) => data[field] !== undefined
         );
-
-        return result.rows[0] ?? null;
+        const values = fields.map((field) => data[field]);
+        const setters = fields.map(
+            (field, index) => `${field} = $${index + 1}`
+        );
+        values.push(ticketId);
+        const result = await client.query(
+            `UPDATE support_tickets SET ${[...setters, 'updated_at = NOW()'].join(', ')}
+             WHERE id = $${values.length} RETURNING *`,
+            values
+        );
+        return result.rows[0];
     }
 }

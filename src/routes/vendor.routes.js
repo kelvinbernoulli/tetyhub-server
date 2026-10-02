@@ -1,3 +1,4 @@
+import * as NotificationController from '#controllers/notification.controller.js';
 import * as BookingController from '#controllers/booking.controller.js';
 import * as SettingsController from "#controllers/settings.controller.js";
 import * as SupportTicketController from "#controllers/support.ticket.controller.js";
@@ -29,15 +30,17 @@ const router = Router();
 // Resolve the vendor from the authenticated database principal for every route.
 router.use(authenticated, isVendorAndVendorAdmin, requireCsrfProtection);
 
+//notifications
+router.get('/notifications', NotificationController.getUserNotifications);
+router.get('/notifications/unread-count', NotificationController.getUnreadCount);
+router.get('/notifications/:notificationId', NotificationController.getUserNotification);
+router.patch('/notifications/mark-all-read', NotificationController.markAllAsRead);
+router.patch('/notifications/:notificationId/read', NotificationController.markAsRead);
+router.delete('/notifications/:notificationId', NotificationController.deleteNotification);
+
 //settings
 router.get("/settings", canRead('settings'), pagination, SettingsController.fetchSettings);
 router.patch("/settings/update", canUpdate('settings'), VendorController.updateVendorSettings);
-
-//support tickets
-router.post("/support-tickets/create", canCreate('support'), SupportTicketController.createSupportTicket);
-router.get("/support-tickets", canRead('support'), pagination, SupportTicketController.fetchSupportTickets);
-router.get("/support-tickets/:ticketId", canRead('support'), SupportTicketController.getSupportTicket);
-router.patch("/support-tickets/:ticketId/reply", canUpdate('support'), SupportTicketController.replyToSupportTicket);
 
 //products
 router.get("/products/search", canRead('products'), pagination, ProductController.searchVendorProducts);
@@ -66,9 +69,10 @@ router.get("/orders/:orderId", canRead('orders'), pagination, VendorController.g
 router.get("/customer-orders", canRead('orders'), pagination, VendorController.getCustomerOrders);
 router.patch("/order/:orderId/update-status", canUpdate('orders'), VendorController.updateOrderStatus);
 router.patch("/order/:orderId/cancel", canUpdate('orders'), VendorController.cancelOrder);
-router.get("/order/history/:customerId", canRead('orders'), pagination, VendorController.getOrderHistory);
+router.get("/order/history/:orderId", canRead('orders'), pagination, VendorController.getOrderHistory);
 
 //shipments
+router.get("/orders/:orderId/shipments", canRead('shipments'), ShipmentController.getShipmentsByOrderId);
 router.post("/orders/:orderId/shipments", canCreate('shipments'), ShipmentController.createShipment);
 router.patch("/shipments/:shipmentId", canUpdate('shipments'), ShipmentController.updateShipment);
 router.get("/shipments/:shipmentId", canRead('shipments'), ShipmentController.getShipmentById);

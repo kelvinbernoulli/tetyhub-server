@@ -1,3 +1,4 @@
+import { notifyOrder, notifyLowStock } from '#services/notifications.js';
 import { createHash, randomUUID } from 'node:crypto';
 import pool from './pg_pool.js';
 import Payment from '#models/payment.model.js';
@@ -237,6 +238,7 @@ export async function processCheckout(user, data) {
                         `Insufficient stock for ${item.product_name}`,
                         409
                     );
+                await notifyLowStock(client, item);
             }
         }
         await client.query(
@@ -279,6 +281,10 @@ export async function processCheckout(user, data) {
                 "UPDATE orders SET payment_status = 'paid', status = 'processing' WHERE id = $1",
                 [order.id]
             );
+            await client.query(
+                "INSERT INTO order_status_history (order_id, status, note, changed_by) VALUES ($1, 'processing', 'Zero-total checkout completed', $2)",
+                [order.id, user.id]
+            );
             order.payment_status = 'paid';
             order.status = 'processing';
             await client.query(
@@ -286,6 +292,7 @@ export async function processCheckout(user, data) {
                 [order.id]
             );
         }
+        await notifyOrder(client, order, order.status, { vendors: order.payment_status === 'paid' });
         return order;
     });
     
@@ -361,6 +368,7 @@ export async function releaseReservation(client, order, reason) {
         "INSERT INTO order_status_history (order_id,status,note) VALUES ($1,'cancelled',$2)",
         [order.id, reason]
     );
+    await notifyOrder(client, order, 'cancelled');
 }
 
 export async function expireReservations() {

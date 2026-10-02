@@ -25,7 +25,7 @@ class Order {
                 json_agg(DISTINCT jsonb_build_object(
                     'id', oi.id,
                     'product_id', oi.product_id,
-                    'product_name', COALESCE(oi.product_name, p.name),
+                    'product_name', p.name,
                     'thumbnail', p.thumbnail,
                     'variant_id', oi.variant_id,
                     'quantity', oi.quantity,
@@ -85,7 +85,7 @@ class Order {
                     json_agg(DISTINCT jsonb_build_object(
                         'id', oi.id,
                         'product_id', oi.product_id,
-                        'product_name', COALESCE(oi.product_name, p.name),
+                        'product_name', p.name,
                         'thumbnail', p.thumbnail,
                         'variant_id', oi.variant_id,
                         'quantity', oi.quantity,
@@ -144,7 +144,7 @@ class Order {
                     json_agg(DISTINCT jsonb_build_object(
                         'id', oi.id,
                         'product_id', oi.product_id,
-                        'product_name', COALESCE(oi.product_name, p.name),
+                        'product_name', p.name,
                         'thumbnail', p.thumbnail,
                         'variant_id', oi.variant_id,
                         'quantity', oi.quantity,
@@ -193,11 +193,13 @@ class Order {
 
             // 1. Fetch order
             const { rows: orderRows } = await client.query(
-                `SELECT * FROM orders WHERE id = $1 AND vendor_id = $2`,
+                `SELECT * FROM orders WHERE id = $1 AND EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = orders.id AND oi.vendor_id = $2)
+                 AND NOT EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = orders.id AND oi.vendor_id <> $2) FOR UPDATE`,
                 [orderId, vendorId]
             );
 
             if (orderRows.length === 0) {
+                await client.query('ROLLBACK');
                 return { error: 'Order not found', code: 404 };
             }
 
@@ -217,7 +219,8 @@ class Order {
                 refunded: [],
             };
 
-            if (!validTransitions[order.status].includes(status)) {
+            if (!validTransitions[order.status]?.includes(status)) {
+                await client.query('ROLLBACK');
                 return {
                     error: `Cannot transition order from ${order.status} to ${status}`,
                     code: 422,
@@ -241,21 +244,7 @@ class Order {
                 [orderId, status, note ?? null, changedBy]
             );
 
-            // 5. Send notification to customer
-            try {
-                await Notification.notifyOrderStatusChange(
-                    orderId,
-                    order.user_id,
-                    order.status,
-                    status
-                );
-            } catch (notificationError) {
-                console.error(
-                    'Error sending order status notification:',
-                    notificationError
-                );
-                // Don't fail the order update if notification fails
-            }
+            await Notification.notifyOrderStatusChange(orderId, order.user_id, order.status, status, client);
 
             await client.query('COMMIT');
             return updatedRows[0];
@@ -298,7 +287,8 @@ class Order {
         }
     }
 
-    static async fetchOrderHistory(orderId, userId = null) {
+    static async fetchOrderHistory(orderId, userId = null, vendorId = null) {
+        if (!userId && !vendorId) return [];
         try {
             const { rows } = await pool.query(
                 `SELECT
@@ -307,9 +297,9 @@ class Order {
                 FROM order_status_history osh
                 LEFT JOIN users u ON u.id = osh.changed_by
                 WHERE osh.order_id = $1
-                ${userId ? 'AND EXISTS (SELECT 1 FROM orders o WHERE o.id = $2 AND o.user_id = $3)' : ''}
-                ORDER BY osh.created_at ASC`,
-                userId ? [orderId, orderId, userId] : [orderId]
+                ${userId ? 'AND EXISTS (SELECT 1 FROM orders o WHERE o.id = osh.order_id AND o.user_id = $2)' : 'AND EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = osh.order_id AND oi.vendor_id = $2)'}
+                ORDER BY osh.created_at ASC, osh.id ASC`,
+                [orderId, userId || vendorId]
             );
             return rows;
         } catch (error) {

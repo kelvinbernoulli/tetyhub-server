@@ -1,3 +1,4 @@
+import { notifyBooking, notifyPaymentFailure } from '#services/notifications.js';
 import { randomUUID } from 'node:crypto';
 import pool from '#services/pg_pool.js';
 import * as gatewayApi from '#utils/payment.js';
@@ -215,10 +216,13 @@ export default class BookingPayment {
             }
             if (
                 payment.status === 'success' ||
-                booking.payment_status === 'paid' ||
-                !success
+                booking.payment_status === 'paid'
             )
                 return current;
+            if (!success) {
+                await notifyPaymentFailure(client, payment, data.status, { booking_id: booking.id, payment_id: payment.id });
+                return current;
+            }
             const status = bookingPayable(booking)
                 ? 'confirmed'
                 : 'payment_review';
@@ -236,18 +240,7 @@ export default class BookingPayment {
                     booking.id,
                 ]
             );
-            await client.query(
-                `INSERT INTO notifications (user_id,type,title,message,metadata)
-                VALUES ($1,'booking',$2,$3,$4)`,
-                [
-                    booking.user_id,
-                    'Booking payment received',
-                    status === 'confirmed'
-                        ? `Your booking for ${booking.service_name} is confirmed.`
-                        : 'Your payment requires refund review because the booking reservation is no longer available.',
-                    JSON.stringify({ booking_id: booking.id }),
-                ]
-            );
+            await notifyBooking(client, booking, status);
             return { booking_id: booking.id, payment_status: 'paid', status };
         });
     }

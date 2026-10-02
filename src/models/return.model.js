@@ -1,6 +1,6 @@
 import pool from "#services/pg_pool.js";
 import Payment from "#models/payment.model.js";
-import Notification from "#models/notification.model.js";
+import { notifyReturn } from '#services/notifications.js';
 
 class Return {
     static async createReturnRequest(orderId, userId, returnData) {
@@ -10,16 +10,18 @@ class Return {
 
             // 1. Verify order belongs to user and is eligible for return
             const { rows: orderRows } = await client.query(
-                `SELECT * FROM orders WHERE id = $1 AND user_id = $2`,
+                `SELECT * FROM orders WHERE id = $1 AND user_id = $2 FOR UPDATE`,
                 [orderId, userId]
             );
 
             if (orderRows.length === 0) {
+                await client.query('ROLLBACK');
                 return { error: 'Order not found', code: 404 };
             }
 
             const order = orderRows[0];
             if (!['delivered', 'shipped'].includes(order.status)) {
+                await client.query('ROLLBACK');
                 return {
                     error: `Cannot create return request for order with status: ${order.status}`,
                     code: 422
@@ -33,10 +35,12 @@ class Return {
             );
 
             if (existingReturn.length > 0) {
+                await client.query('ROLLBACK');
                 return { error: 'Return request already exists for this order', code: 409 };
             }
 
             // 3. Validate return items
+            let returnVendorId = null;
             for (const item of returnData.items) {
                 const { rows: orderItemRows } = await client.query(
                     `SELECT * FROM order_items WHERE id = $1 AND order_id = $2`,
@@ -44,13 +48,22 @@ class Return {
                 );
 
                 if (orderItemRows.length === 0) {
+                    await client.query('ROLLBACK');
                     return {
                         error: `Order item ${item.order_item_id} not found in this order`,
                         code: 422
                     };
                 }
 
+                const itemVendorId = orderItemRows[0].vendor_id;
+                if (returnVendorId !== null && returnVendorId !== itemVendorId) {
+                    await client.query('ROLLBACK');
+                    return { error: 'A return request must contain items from one vendor', code: 422 };
+                }
+                returnVendorId = itemVendorId;
+
                 if (item.quantity > orderItemRows[0].quantity) {
+                    await client.query('ROLLBACK');
                     return {
                         error: `Return quantity for item ${item.order_item_id} exceeds ordered quantity`,
                         code: 422
@@ -67,7 +80,7 @@ class Return {
                 [
                     orderId,
                     userId,
-                    order.vendor_id,
+                    returnVendorId,
                     returnData.reason,
                     returnData.description ?? null,
                     returnData.return_type,
@@ -99,6 +112,11 @@ class Return {
                 [orderId]
             );
 
+            await client.query(
+                "INSERT INTO order_status_history (order_id, status, note, changed_by) VALUES ($1, 'returned', 'Return requested', $2)",
+                [orderId, userId]
+            );
+            await notifyReturn(client, returnRequest, 'pending', { vendors: true });
             await client.query('COMMIT');
             return returnRequest;
         } catch (error) {
@@ -117,17 +135,22 @@ class Return {
 
             // 1. Verify return belongs to vendor
             const { rows: returnRows } = await client.query(
-                `SELECT r.*, o.vendor_id FROM returns r
+                `SELECT r.* FROM returns r
                 JOIN orders o ON o.id = r.order_id
-                WHERE r.id = $1 AND o.vendor_id = $2`,
+                WHERE r.id = $1 AND r.vendor_id = $2 FOR UPDATE OF r`,
                 [returnId, vendorId]
             );
 
             if (returnRows.length === 0) {
+                await client.query('ROLLBACK');
                 return { error: 'Return request not found', code: 404 };
             }
 
             const returnRequest = returnRows[0];
+            if (returnRequest.status === status && !notes) {
+                await client.query('COMMIT');
+                return { success: true };
+            }
 
             // 2. Update return status and timestamps
             const updateFields = ['status = $1', 'updated_at = NOW()'];
@@ -136,7 +159,7 @@ class Return {
 
             if (notes) {
                 updateFields.push(`vendor_notes = $${paramIndex++}`);
-                values.splice(1, 0, notes);
+                values.push(notes);
             }
 
             // Set timestamps based on status
@@ -152,7 +175,7 @@ class Return {
             );
 
             // 3. If approved and refund requested, process refund
-            if (status === 'approved' && returnRequest.return_type === 'refund') {
+            if (status !== returnRequest.status && status === 'approved' && returnRequest.return_type === 'refund') {
                 // Calculate refund amount based on returned items
                 const { rows: returnItems } = await client.query(
                     `SELECT ri.quantity, oi.price
@@ -185,6 +208,7 @@ class Return {
                 }
             }
 
+            if (status !== returnRequest.status) await notifyReturn(client, returnRequest, status);
             await client.query('COMMIT');
             return { success: true };
         } catch (error) {
@@ -300,11 +324,12 @@ class Return {
 
             // 1. Verify return exists
             const { rows: returnRows } = await client.query(
-                `SELECT * FROM returns WHERE id = $1`,
+                `SELECT * FROM returns WHERE id = $1 FOR UPDATE`,
                 [returnId]
             );
 
             if (returnRows.length === 0) {
+                await client.query('ROLLBACK');
                 return { error: 'Return request not found', code: 404 };
             }
 
@@ -342,6 +367,9 @@ class Return {
                 values
             );
 
+            if (updateData.status && updateData.status !== returnRequest.status) {
+                await notifyReturn(client, returnRequest, updateData.status, { vendors: true });
+            }
             await client.query('COMMIT');
             return { success: true };
         } catch (error) {

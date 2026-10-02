@@ -1,3 +1,4 @@
+import Notification from '#models/notification.model.js';
 import pool from '#services/pg_pool.js';
 import {
     ADMIN_SCOPES,
@@ -284,6 +285,7 @@ export class AdminModel {
                 audit,
             });
 
+            await Notification.createNotification(createdUser.id, 'account', 'Administrator invitation', 'You have been invited to join the team. Use the invitation email to activate your account.', { admin_id: createdAdmin.admin_id }, client);
             await client.query('COMMIT');
             return { ...createdUser, ...createdAdmin, permissions: [] };
         } catch (error) {
@@ -355,6 +357,7 @@ export class AdminModel {
             });
 
             const activated = await fetchAdminDetails(client, target.admin_id);
+            await Notification.createNotification(target.user_id, 'account', 'Administrator account activated', 'Your administrator account is now active.', { admin_id: target.admin_id }, client);
             await client.query('COMMIT');
             return activated;
         } catch (error) {
@@ -585,6 +588,9 @@ export class AdminModel {
             });
 
             const updated = await fetchAdminDetails(client, adminId);
+            if (fields.status && fields.status !== target.admin_status) {
+                await Notification.createNotification(target.user_id, 'account', 'Account access updated', `Your administrator access is ${fields.status}.`, { admin_id: adminId, status: fields.status }, client);
+            }
             await client.query('COMMIT');
             return updated;
         } catch (error) {
@@ -638,6 +644,9 @@ export class AdminModel {
                 audit,
             });
 
+            if (target.admin_status !== ADMIN_STATUSES.REVOKED) {
+                await Notification.createNotification(target.user_id, 'account', 'Administrator access revoked', 'Your administrator access has been revoked.', { admin_id: adminId }, client);
+            }
             await client.query('COMMIT');
             return { adminId, userId: target.user_id };
         } catch (error) {
@@ -880,6 +889,7 @@ export class AdminModel {
                 audit,
             });
 
+            await Notification.createNotification(target.user_id, 'permissions', 'Permissions updated', 'Your administrator permissions have changed. Sign in again to use your updated access.', { admin_id: adminId }, client);
             await client.query('COMMIT');
             return after;
         } catch (error) {

@@ -69,6 +69,8 @@ test(
             INSERT INTO products(vendor_id,currency_id,name,price,stock) VALUES (1,1,'Last item',10,1);
             INSERT INTO carts(user_id) VALUES (1),(2);
             INSERT INTO cart_items(cart_id,product_id,quantity,price) VALUES (1,1,1,1),(2,1,1,1);`);
+            await db.query(await readFile(new URL('./fixtures/notification-recipients.sql', import.meta.url), 'utf8'));
+            await db.query('ALTER TABLE products ADD COLUMN low_stock_threshold INTEGER DEFAULT 10; ALTER TABLE product_variants ADD COLUMN low_stock_threshold INTEGER DEFAULT 5');
             t.mock.method(pool, 'connect', () => db.connect());
             t.mock.method(pool, 'query', (sql, values) =>
                 db.query(sql, values)

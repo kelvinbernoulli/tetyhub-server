@@ -32,15 +32,16 @@ export const updateProfileSchema = Joi.object({
     firstname:      Joi.string().trim().min(2).max(100).optional().label("First Name"),
     lastname:       Joi.string().trim().min(2).max(100).optional().label("Last Name"),
     phone:          Joi.string().trim().pattern(phoneRegex).optional().label("Phone"),
-    gender:         Joi.string().valid('male', 'female', 'other').optional().label("Gender"),
-    date_of_birth:  Joi.date().max('now').optional().label("Date of Birth"),
+    gender:         Joi.string().valid('male', 'female').optional().label("Gender"),
+    dob:            Joi.date().max('now').optional().label("Date of Birth"),
     avatar:         Joi.string().pattern(base64ImagePattern).optional().label("Avatar"),
 }).min(1);
 
 export const addAddressSchema = Joi.object({
     firstname:      Joi.string().trim().max(100).required().label("First Name"),
     lastname:       Joi.string().trim().max(100).required().label("Last Name"),
-    phone:          Joi.string().trim().pattern(phoneRegex).required().label("Phone"),
+    phone_one:      Joi.string().trim().pattern(phoneRegex).required().label("Phone 1"),
+    phone_two:      Joi.string().trim().pattern(phoneRegex).optional().label("Phone 2"),
     address:        Joi.string().trim().max(500).required().label("Address"),
     city:           Joi.string().trim().max(100).required().label("City"),
     state:          Joi.string().trim().max(100).required().label("State"),
@@ -50,7 +51,7 @@ export const addAddressSchema = Joi.object({
 });
 
 export const updateAddressSchema = addAddressSchema.fork(
-    ['firstname', 'lastname', 'phone', 'address', 'city', 'state', 'country', 'zip_code', 'is_default'],
+    ['firstname', 'lastname', 'phone_one', 'phone_two', 'address', 'city', 'state', 'country', 'zip_code', 'is_default'],
     (field) => field.optional()
 ).min(1);
 
