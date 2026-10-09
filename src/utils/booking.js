@@ -49,7 +49,7 @@ export function cancellationRefund(booking, byVendor, now = new Date()) {
 
 export function bookingPayable(booking, now = new Date()) {
     return (
-        booking.booking_status === 'pending' &&
+        booking.booking_status === 'accepted' &&
         booking.payment_status === 'unpaid' &&
         booking.reservation_expires_at &&
         new Date(booking.reservation_expires_at) > now &&

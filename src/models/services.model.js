@@ -3,6 +3,12 @@ import { randomUUID } from 'node:crypto';
 import slugify from 'slugify';
 import { normalizeServiceState, serviceError } from '#utils/service-state.js';
 import { S3upload, S3delete } from '#services/s3bucket.js';
+import {
+    assertCanCreateService,
+    assertCanUploadPortfolioImage,
+    getProviderPlan,
+    lockProviderEntitlements,
+} from '#services/entitlements.js';
 
 const FIELDS = [
     'category_id',
@@ -39,6 +45,36 @@ const requireVendor = (vendorId) => {
     if (!Number.isInteger(vendorId) || vendorId < 1 || vendorId > 2147483647)
         throw serviceError('Vendor authentication required', 403);
 };
+async function countActiveServices(client, vendorId, excludeServiceId) {
+    const values = [vendorId];
+    let exclusion = '';
+    if (excludeServiceId != null) {
+        values.push(excludeServiceId);
+        exclusion = ' AND id <> $2';
+    }
+    const { rows } = await client.query(
+        `SELECT COUNT(*)::integer AS count
+         FROM services
+         WHERE vendor_id = $1 AND status = 'active' AND deleted_at IS NULL${exclusion}`,
+        values
+    );
+    return Number(rows[0].count);
+}
+async function countPortfolioImages(client, vendorId, excludeServiceId) {
+    const values = [vendorId];
+    let exclusion = '';
+    if (excludeServiceId != null) {
+        values.push(excludeServiceId);
+        exclusion = ' AND id <> $2';
+    }
+    const { rows } = await client.query(
+        `SELECT COALESCE(SUM(cardinality(images)), 0)::integer AS count
+         FROM services
+         WHERE vendor_id = $1 AND deleted_at IS NULL${exclusion}`,
+        values
+    );
+    return Number(rows[0].count);
+}
 async function transaction(work) {
     const client = await pool.connect();
     const uploaded = [];
@@ -138,7 +174,6 @@ const PUBLIC_SELECT = `SELECT s.id, s.vendor_id, s.slug,
     ${RELATED_FIELDS} FROM ${PUBLIC_FROM}`;
 const PUBLIC_WHERE = [
     "s.status = 'active'",
-    's.deleted_at IS NULL',
     "v.status = 'active'",
     'cur.status = true',
 ];
@@ -148,8 +183,25 @@ export class Services {
     static async create(vendorId, data) {
         requireVendor(vendorId);
         return transaction(async (client, uploaded) => {
+            await lockProviderEntitlements(client, vendorId);
             const fields = normalizeServiceState(pick(data), {}, true);
             if (!fields.category_id) throw serviceError('Category is required');
+            const { plan, catalog } = await getProviderPlan(client, vendorId);
+            if ((fields.status ?? 'active') === 'active') {
+                assertCanCreateService(
+                    plan,
+                    await countActiveServices(client, vendorId),
+                    { catalog }
+                );
+            }
+            const imagesToAdd = fields.images?.length ?? 0;
+            if (imagesToAdd > 0) {
+                assertCanUploadPortfolioImage(
+                    plan,
+                    await countPortfolioImages(client, vendorId),
+                    { catalog, requestedCount: imagesToAdd }
+                );
+            }
             await validateRelations(client, fields);
             await uploadMedia(fields, vendorId, uploaded);
             fields.vendor_id = vendorId;
@@ -166,6 +218,7 @@ export class Services {
     static async update(id, vendorId, data) {
         requireVendor(vendorId);
         return transaction(async (client, uploaded) => {
+            await lockProviderEntitlements(client, vendorId);
             const found = await client.query(
                 'SELECT * FROM services WHERE id = $1 AND vendor_id = $2 AND deleted_at IS NULL FOR UPDATE',
                 [id, vendorId]
@@ -176,6 +229,25 @@ export class Services {
             const keys = Object.keys(fields);
             if (!keys.length)
                 throw serviceError('No valid fields provided', 400);
+            const { plan, catalog } = await getProviderPlan(client, vendorId);
+            if (
+                (fields.status ?? existing.status) === 'active' &&
+                existing.status !== 'active'
+            ) {
+                assertCanCreateService(
+                    plan,
+                    await countActiveServices(client, vendorId, id),
+                    { catalog }
+                );
+            }
+            const imagesToAdd = fields.images?.length ?? 0;
+            if (imagesToAdd > 0) {
+                assertCanUploadPortfolioImage(
+                    plan,
+                    await countPortfolioImages(client, vendorId, id),
+                    { catalog, requestedCount: imagesToAdd }
+                );
+            }
             await validateRelations(client, { ...existing, ...fields });
             await uploadMedia(fields, vendorId, uploaded);
             const { rows } = await client.query(

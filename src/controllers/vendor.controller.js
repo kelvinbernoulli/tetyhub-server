@@ -175,7 +175,7 @@ export const updateOrderStatus = async (req, res) => {
         }
 
         // Send status update email to customer
-        await sendOrderStatusEmail(result);
+        if (result.order_status_changed) await sendOrderStatusEmail(result);
 
         return respondWithSuccess(
             res,

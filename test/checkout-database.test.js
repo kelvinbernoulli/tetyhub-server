@@ -45,10 +45,13 @@ test(
             CREATE TABLE cart_items (id SERIAL PRIMARY KEY,cart_id INT REFERENCES carts(id),product_id INT REFERENCES products(id),variant_id INT,quantity INT,price NUMERIC(10,2));
             CREATE TABLE coupons (id SERIAL PRIMARY KEY,vendor_id INT,product_id INT,service_id INT,code TEXT,type TEXT,value NUMERIC(10,2),
                 min_order NUMERIC(10,2) DEFAULT 0,max_discount NUMERIC(10,2),usage_limit INT,usage_count INT DEFAULT 0,status TEXT,expires_at TIMESTAMP);
-            CREATE TABLE orders (id SERIAL PRIMARY KEY,user_id INT REFERENCES users(id),order_number TEXT UNIQUE NOT NULL,
+            CREATE TABLE orders (id SERIAL PRIMARY KEY,user_id INT REFERENCES users(id),currency_id INT,order_number TEXT UNIQUE NOT NULL,
                 subtotal NUMERIC(10,2),shipping_fee NUMERIC(10,2),discount NUMERIC(10,2),total NUMERIC(10,2),payment_method TEXT,note TEXT,
                 coupon_id INT,coupon_code TEXT,status TEXT DEFAULT 'pending',payment_status TEXT DEFAULT 'unpaid',updated_at TIMESTAMP,created_at TIMESTAMP DEFAULT NOW());
             CREATE TABLE order_items (id SERIAL PRIMARY KEY,order_id INT REFERENCES orders(id),vendor_id INT NOT NULL,product_id INT,variant_id INT,quantity INT,price NUMERIC(10,2),subtotal NUMERIC(10,2));
+            CREATE TABLE shipments (id SERIAL PRIMARY KEY,order_id INT,vendor_id INT,status TEXT DEFAULT 'pending');
+            CREATE UNIQUE INDEX shipments_order_id_key ON shipments(order_id);
+            CREATE TABLE service_bookings (id SERIAL PRIMARY KEY);
             CREATE TABLE payments (id SERIAL PRIMARY KEY,order_id INT REFERENCES orders(id),user_id INT,gateway TEXT,gateway_ref TEXT UNIQUE,
                 amount NUMERIC(10,2),currency_id INT NOT NULL,status TEXT DEFAULT 'pending',meta TEXT,updated_at TIMESTAMP,created_at TIMESTAMP DEFAULT NOW());
             CREATE TABLE shipping_addresses (id SERIAL PRIMARY KEY,order_id INT NOT NULL REFERENCES orders(id),user_id INT NOT NULL,
@@ -58,6 +61,24 @@ test(
                 await readFile(
                     new URL(
                         '../prisma/migrations/20260911120000_checkout_reliability/migration.sql',
+                        import.meta.url
+                    ),
+                    'utf8'
+                )
+            );
+            await db.query(
+                await readFile(
+                    new URL(
+                        '../prisma/migrations/20261011090000_vendor_order_fulfillments/migration.sql',
+                        import.meta.url
+                    ),
+                    'utf8'
+                )
+            );
+            await db.query(
+                await readFile(
+                    new URL(
+                        '../prisma/migrations/20261011110000_marketplace_commissions/migration.sql',
                         import.meta.url
                     ),
                     'utf8'

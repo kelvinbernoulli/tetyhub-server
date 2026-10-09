@@ -4,8 +4,8 @@ export default class SupportTicket {
     static async create(client, vendorId, data) {
         const result = await client.query(
             `INSERT INTO support_tickets
-                (subject, priority, status, vendor_id, ticket_number, user_id, category)
-             VALUES ($1, $2, 'open', $3, $4, $5, $6) RETURNING *`,
+                (subject, priority, status, vendor_id, ticket_number, user_id, category, assigned_to)
+             VALUES ($1, $2, 'open', $3, $4, $5, $6, $7) RETURNING *`,
             [
                 data.subject,
                 data.priority,
@@ -13,6 +13,7 @@ export default class SupportTicket {
                 data.ticketNumber,
                 data.userId,
                 data.category,
+                data.assignedTo,
             ]
         );
         return result.rows[0];
@@ -60,9 +61,14 @@ export default class SupportTicket {
     }
 
     static async update(client, ticketId, data) {
-        const fields = ['status', 'priority', 'assigned_to'].filter(
-            (field) => data[field] !== undefined
-        );
+        const fields = [
+            'status',
+            'priority',
+            'assigned_to',
+            'pending_assigned_to',
+            'transfer_requested_by',
+            'transfer_requested_at',
+        ].filter((field) => data[field] !== undefined);
         const values = fields.map((field) => data[field]);
         const setters = fields.map(
             (field, index) => `${field} = $${index + 1}`

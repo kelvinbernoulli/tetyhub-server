@@ -43,6 +43,78 @@ test('history scopes customers and vendors separately and fails closed without s
     assert.match(calls[1].sql, /osh.created_at ASC, osh.id ASC/);
 });
 
+test('vendor fulfillment updates stay scoped and do not advance the parent early', async (t) => {
+    const calls = [];
+    const client = {
+        async query(sql, values = []) {
+            calls.push({ sql, values });
+            if (sql.startsWith('SELECT o.*, vof.status')) {
+                return {
+                    rows: [{
+                        id: 1,
+                        user_id: 2,
+                        order_number: 'ORD-1',
+                        status: 'processing',
+                        payment_status: 'paid',
+                        vendor_fulfillment_status: 'processing',
+                    }],
+                };
+            }
+            if (sql.startsWith('SELECT status FROM vendor_order_fulfillments')) {
+                return { rows: [{ status: 'awaiting_shipment' }, { status: 'processing' }] };
+            }
+            return { rows: [] };
+        },
+        release() {},
+    };
+    t.mock.method(pool, 'connect', async () => client);
+
+    const result = await Order.updateOrderStatus(1, 3, 30, {
+        status: 'awaiting_shipment',
+    });
+
+    assert.equal(result.status, 'processing');
+    assert.equal(result.vendor_fulfillment_status, 'awaiting_shipment');
+    assert.equal(result.order_status_changed, false);
+    assert.deepEqual(
+        calls.find((call) => call.sql.startsWith('UPDATE vendor_order_fulfillments')).values,
+        ['awaiting_shipment', 1, 3]
+    );
+    assert.ok(!calls.some((call) => call.sql.startsWith('UPDATE orders')));
+    assert.ok(calls.some((call) => call.sql.startsWith('INSERT INTO notifications')));
+    assert.ok(calls.some((call) => call.sql === 'COMMIT'));
+});
+
+test('customer delivery confirmation makes only a delivered vendor payout-eligible', async (t) => {
+    const calls = [];
+    const client = {
+        async query(sql, values = []) {
+            calls.push({ sql, values });
+            if (sql.startsWith('SELECT * FROM orders'))
+                return { rows: [{ id: 1, user_id: 2, payment_status: 'paid', currency_id: 1 }] };
+            if (sql.startsWith('SELECT * FROM vendor_order_fulfillments'))
+                return { rows: [{ id: 8, status: 'delivered', payout_status: 'held' }] };
+            if (sql.startsWith('SELECT id FROM shipments'))
+                return { rows: [{ id: 4 }] };
+            if (sql.startsWith('SELECT 1 FROM returns'))
+                return { rows: [] };
+            return { rows: [] };
+        },
+        release() {},
+    };
+    t.mock.method(pool, 'connect', async () => client);
+
+    const result = await Order.confirmVendorDelivery(1, 2, 3);
+    assert.deepEqual(result, {
+        order_id: 1,
+        vendor_id: 3,
+        payout_status: 'eligible',
+    });
+    assert.ok(calls.some((call) => call.sql.includes("SET payout_status = 'eligible'")));
+    assert.ok(calls.some((call) => call.sql.includes("'payout_eligible'")));
+    assert.ok(calls.some((call) => call.sql === 'COMMIT'));
+});
+
 test('vendor history uses the authorized vendor rather than the session user', async (t) => {
     const calls = [];
     t.mock.method(Order, 'fetchOrderHistory', async (...args) => { calls.push(args); return []; });
@@ -60,6 +132,7 @@ test('return request records the customer actor before commit', async (t) => {
         if (sql.startsWith('SELECT * FROM orders')) return { rows: [{ id: 1, status: 'delivered' }] };
         if (sql.startsWith('SELECT * FROM order_items')) return { rows: [{ id: 9, vendor_id: 3, quantity: 1 }] };
         if (sql.startsWith('INSERT INTO returns')) return { rows: [{ id: 4, user_id: 2 }] };
+        if (sql.startsWith('SELECT COUNT(DISTINCT vendor_id)')) return { rows: [{ count: 1 }] };
     });
     await Return.createReturnRequest(1, 2, { items: [{ order_item_id: 9, quantity: 1 }], reason: 'Damaged', return_type: 'refund' });
     const history = calls.findIndex(x => x.sql.startsWith('INSERT INTO order_status_history'));
@@ -67,4 +140,20 @@ test('return request records the customer actor before commit', async (t) => {
     assert.match(calls[history].sql, /'returned'/);
     assert.deepEqual(calls[history].values, [1, 2]);
     assert.ok(history < calls.findIndex(x => x.sql === 'COMMIT'));
+});
+
+test('a return from one vendor does not mark a multi-vendor order returned', async (t) => {
+    const calls = database(t, sql => {
+        if (sql.startsWith('SELECT * FROM orders')) return { rows: [{ id: 1, status: 'delivered' }] };
+        if (sql.startsWith('SELECT * FROM order_items')) return { rows: [{ id: 9, vendor_id: 3, quantity: 1 }] };
+        if (sql.startsWith('INSERT INTO returns')) return { rows: [{ id: 4, user_id: 2 }] };
+        if (sql.startsWith('SELECT COUNT(DISTINCT vendor_id)')) return { rows: [{ count: 2 }] };
+    });
+    await Return.createReturnRequest(1, 2, {
+        items: [{ order_item_id: 9, quantity: 1 }],
+        reason: 'Damaged',
+        return_type: 'refund',
+    });
+    assert.ok(!calls.some(x => x.sql.startsWith('UPDATE orders')));
+    assert.ok(!calls.some(x => x.sql.startsWith('INSERT INTO order_status_history')));
 });

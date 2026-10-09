@@ -69,7 +69,7 @@ export const replaceAdminPermissions = async (req, res) => {
         return respondWithSuccess(
             res,
             200,
-            'Permissions replaced successfully.',
+            'Permissions updated successfully.',
             permissions
         );
     } catch (error) {

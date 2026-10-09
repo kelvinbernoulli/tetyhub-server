@@ -13,16 +13,31 @@ export async function initializePaystack({
     reference,
     currency,
     metadata,
+    planCode,
+    channels,
 }) {
-    const { data } = await paystack.post('/transaction/initialize', {
+    const payload = {
         email,
         amount: minorUnits(amount),
         reference,
         currency,
         metadata,
-    });
+    };
+    if (planCode) payload.plan = planCode;
+    if (channels) payload.channels = channels;
+    const { data } = await paystack.post('/transaction/initialize', payload);
     if (!data.status || !data.data?.authorization_url)
         throw new Error('Payment initialization failed');
+    return data.data;
+}
+export async function createPaystackPlan({ name, amount, interval = 'monthly' }) {
+    const { data } = await paystack.post('/plan', {
+        name,
+        amount: minorUnits(amount),
+        interval,
+    });
+    if (!data.status || !data.data?.plan_code)
+        throw new Error('Paystack plan creation failed');
     return data.data;
 }
 export async function verifyPaystack(reference) {
@@ -31,6 +46,18 @@ export async function verifyPaystack(reference) {
     );
     if (!data.status || !data.data)
         throw new Error('Payment verification unavailable');
+    return data.data;
+}
+export async function disablePaystackSubscription({
+    code,
+    token,
+}) {
+    const { data } = await paystack.post('/subscription/disable', {
+        code,
+        token,
+    });
+    if (!data.status)
+        throw new Error('Paystack subscription cancellation failed');
     return data.data;
 }
 export const initializeStripe = ({

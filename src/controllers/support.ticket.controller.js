@@ -1,6 +1,8 @@
 import {
     supportTicketSchema,
     ticketReplySchema,
+    ticketTransferDecisionSchema,
+    ticketTransferRequestSchema,
     ticketUpdateSchema,
     ticketFilterSchema,
     ticketMessagesSchema,
@@ -15,11 +17,18 @@ import {
     updateTicket,
     getSupportAgents,
     checkReplyAccess,
+    requestTicketTransfer,
+    respondToTicketTransfer,
 } from '#services/support.js';
 import ERROR_CODES from '#utils/error.codes.js';
 import { isPlatformActor } from '#utils/access-control.js';
 import { respondWithError, respondWithSuccess } from '#utils/response.js';
 import { randomUUID } from 'node:crypto';
+
+const isSupportStaffActor = (actor) => {
+    if (actor?.supportStaff === true) return true;
+    return isPlatformActor(actor?.role);
+};
 
 const getActor = (req) => {
     if (!req.auth)
@@ -28,8 +37,10 @@ const getActor = (req) => {
         });
     return {
         ...req.auth,
-        supportStaff:
-            req.supportStaff === true && isPlatformActor(req.auth.role),
+        supportStaff: isSupportStaffActor({
+            supportStaff: req.supportStaff,
+            role: req.auth.role,
+        }),
     };
 };
 const validate = (schema, data) => {
@@ -56,6 +67,7 @@ const handleError = (res, error) => {
         401: ERROR_CODES.UNAUTHORIZED,
         403: ERROR_CODES.FORBIDDEN,
         404: ERROR_CODES.RESOURCE_NOT_FOUND,
+        409: ERROR_CODES.RESOURCE_CONFLICT,
     };
     if (status === 500) console.error(error);
     return respondWithError(
@@ -192,6 +204,46 @@ export const updateSupportTicket = async (req, res) => {
             res,
             200,
             'Ticket updated successfully',
+            ticket
+        );
+    } catch (error) {
+        return handleError(res, error);
+    }
+};
+
+export const requestSupportTicketTransfer = async (req, res) => {
+    try {
+        const ticket = await requestTicketTransfer(
+            getTicketId(req),
+            getActor(req),
+            validate(ticketTransferRequestSchema, req.body)
+        );
+        return respondWithSuccess(
+            res,
+            200,
+            'Ticket transfer requested successfully',
+            ticket
+        );
+    } catch (error) {
+        return handleError(res, error);
+    }
+};
+
+export const respondToSupportTicketTransfer = async (req, res) => {
+    try {
+        const { decision } = validate(
+            ticketTransferDecisionSchema,
+            req.body
+        );
+        const ticket = await respondToTicketTransfer(
+            getTicketId(req),
+            getActor(req),
+            { decision }
+        );
+        return respondWithSuccess(
+            res,
+            200,
+            `Ticket transfer ${decision === 'accept' ? 'accepted' : 'declined'} successfully`,
             ticket
         );
     } catch (error) {

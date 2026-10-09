@@ -62,7 +62,7 @@ const fields = {
         
         .min(0)
         .max(100),
-    images: Joi.array().items(base64Image).max(5),
+    images: Joi.array().items(base64Image).max(100),
     thumbnail: base64Image.allow(null),
     meta_title: Joi.string().trim().max(255).allow(null, ''),
     meta_description: Joi.string().trim().max(500).allow(null, ''),

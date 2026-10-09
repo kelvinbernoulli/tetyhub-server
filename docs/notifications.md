@@ -62,7 +62,7 @@ Notifications are inserted with the same client and transaction as their busines
 
 Deploy the new `20260924150000_notification_indexes` migration before using the updated return workflow. It adds inbox indexes and the return notes/evidence/timestamp/item-condition fields already accepted by the existing return API. The previously added support migration is also required for support.
 
-The affected whole-order mutation paths now resolve vendor ownership from order items. A vendor can only change a whole order/shipment when every item belongs to that vendor. Per-vendor fulfillment of mixed-vendor orders requires a separate fulfillment design. A return request must contain items from one vendor.
+Product orders retain one parent checkout and payment, with a fulfillment record for each vendor. Vendors see and update only their own fulfillment status and line items; the customer order exposes those vendor groups. The parent order status reflects the least-advanced active vendor status and reaches delivery completion only when all vendor groups do. A vendor status change creates a customer notification even when another vendor keeps the parent status unchanged. Shipment updates advance only the matching vendor fulfillment. A return request must contain items from one vendor.
 
 Run:
 

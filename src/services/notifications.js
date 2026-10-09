@@ -86,10 +86,29 @@ export async function notifyBooking(
     { vendors = true } = {}
 ) {
     const metadata = { booking_id: booking.id, status };
+    const messageByStatus = {
+        pending: 'A new booking request is waiting for the vendor to respond.',
+        accepted: 'The vendor accepted your booking. Complete payment before the reservation expires.',
+        declined: 'The vendor declined your booking request.',
+        expired: 'The booking request or payment window expired.',
+        reschedule_proposed: 'The vendor proposed a new booking time. Review it and approve or decline.',
+        reschedule_approved: 'The buyer approved the proposed booking time.',
+        reschedule_declined: 'The buyer declined the proposed booking time.',
+        payment_review:
+            'Your booking payment needs review because the reservation is no longer available.',
+    };
+    const vendorMessageByStatus = {
+        pending: 'A new customer booking request is waiting for your response.',
+        accepted: 'You accepted this booking. The customer can now pay before the reservation expires.',
+        declined: 'You declined this booking request.',
+        expired: 'This booking request or payment window expired.',
+        reschedule_proposed: 'Your proposed booking time is awaiting buyer approval.',
+        reschedule_approved: 'The buyer approved your proposed booking time.',
+        reschedule_declined: 'The buyer declined your proposed booking time.',
+    };
     const message =
-        status === 'payment_review'
-            ? 'Your booking payment needs review because the reservation is no longer available.'
-            : `Your booking is ${status.replaceAll('_', ' ')}.`;
+        messageByStatus[status] ??
+        `Your booking is ${status.replaceAll('_', ' ')}.`;
     await Notification.createNotification(
         booking.user_id,
         'booking',
@@ -108,7 +127,8 @@ export async function notifyBooking(
             recipients.filter((id) => id !== booking.user_id),
             'booking',
             'Booking updated',
-            `Booking #${booking.id} is ${status.replaceAll('_', ' ')}.`,
+            vendorMessageByStatus[status] ??
+                `Booking #${booking.id} is ${status.replaceAll('_', ' ')}.`,
             metadata,
             client
         );

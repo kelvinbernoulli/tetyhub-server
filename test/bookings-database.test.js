@@ -43,7 +43,7 @@ test(
                 max_bookings_per_slot INT DEFAULT 1, status TEXT DEFAULT 'active', deleted_at TIMESTAMP,
                 location_type TEXT DEFAULT 'remote', cancellation_window_hours INT DEFAULT 24, cancellation_fee_percent FLOAT DEFAULT 0);
             CREATE TABLE products (id SERIAL PRIMARY KEY);
-            CREATE TABLE orders (id SERIAL PRIMARY KEY, user_id INT REFERENCES users(id));
+            CREATE TABLE orders (id SERIAL PRIMARY KEY, user_id INT REFERENCES users(id), currency_id INT);
             CREATE TABLE order_items (id SERIAL PRIMARY KEY, order_id INT REFERENCES orders(id), product_id INT REFERENCES products(id), service_id INT REFERENCES services(id));
             CREATE TABLE service_bookings (id SERIAL PRIMARY KEY, order_item_id INT UNIQUE REFERENCES order_items(id),
                 service_id INT NOT NULL REFERENCES services(id), scheduled_for TIMESTAMP NOT NULL, booking_status TEXT DEFAULT 'pending', additional_notes TEXT);
@@ -87,6 +87,20 @@ test(
                 await client.query(
                     await migration('20260912130000_booking_workflow')
                 );
+                await client.query(
+                    await migration('20261008180000_vendor_booking_lifecycle')
+                );
+                await client.query(`
+                    CREATE TABLE vendor_order_fulfillments (
+                        id SERIAL PRIMARY KEY,
+                        order_id INTEGER NOT NULL REFERENCES orders(id),
+                        vendor_id INTEGER NOT NULL REFERENCES vendors(id),
+                        UNIQUE(order_id, vendor_id)
+                    );
+                `);
+                await client.query(
+                    await migration('20261011110000_marketplace_commissions')
+                );
             } finally {
                 client.release();
             }
@@ -128,6 +142,7 @@ test(
                 await Booking.view(booking.id, winner === 0 ? 2 : 1),
                 null
             );
+            await Booking.decide(booking.id, 1, { decision: 'accept' });
             const previousApi = BookingPayment.gatewayApi;
             BookingPayment.gatewayApi = {
                 initializePaystack: async ({ reference }) => ({
@@ -147,6 +162,10 @@ test(
                 currency: 'NGN',
                 status: 'success',
             };
+            const notificationCountBeforeSettlement = Number(
+                (await db.query('SELECT count(*) FROM notifications')).rows[0]
+                    .count
+            );
             const confirmations = await Promise.all([
                 BookingPayment.settle('paystack', event, 'event-1'),
                 BookingPayment.settle('paystack', event, 'event-1'),
@@ -155,7 +174,7 @@ test(
             assert.equal(
                 (await db.query('SELECT count(*) FROM notifications')).rows[0]
                     .count,
-                '1'
+                String(notificationCountBeforeSettlement + 1)
             );
             assert.equal(
                 (await db.query('SELECT order_id FROM payments')).rows[0]
@@ -187,6 +206,7 @@ test(
                 ...request,
                 idempotency_key: randomUUID(),
             });
+            await Booking.decide(next.id, 1, { decision: 'accept' });
             const nextPayment = await BookingPayment.initiate(1, next.id);
             await db.query(
                 "UPDATE service_bookings SET reservation_expires_at = NOW() - INTERVAL '1 second' WHERE id = $1",

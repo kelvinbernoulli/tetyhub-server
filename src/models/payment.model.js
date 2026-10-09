@@ -1,4 +1,5 @@
 import { notifyOrder, notifyPaymentFailure } from '#services/notifications.js';
+import { recordProductSale } from '#services/marketplace-ledger.js';
 import BookingPayment from '#models/booking-payment.model.js';
 import { randomUUID } from 'node:crypto';
 import pool from '#services/pg_pool.js';
@@ -253,6 +254,20 @@ export class Payment {
                 "UPDATE orders SET payment_status = 'paid', status = $1, reservation_expires_at = NULL, updated_at = NOW() WHERE id = $2",
                 [status, order.id]
             );
+            if (status === 'processing') {
+                await client.query(
+                    "UPDATE vendor_order_fulfillments SET status = 'processing', updated_at = NOW() WHERE order_id = $1",
+                    [order.id]
+                );
+                await client.query(
+                    `INSERT INTO vendor_order_fulfillment_history
+                     (fulfillment_id, status, note)
+                     SELECT id, status, 'Payment confirmed'
+                     FROM vendor_order_fulfillments WHERE order_id = $1`,
+                    [order.id]
+                );
+                await recordProductSale(client, order.id);
+            }
             await client.query(
                 'INSERT INTO order_status_history (order_id,status,note) VALUES ($1,$2,$3)',
                 [

@@ -3,6 +3,7 @@ import { emailVerification } from "#templates/account.activation.js";
 import { adminRegistration } from "#templates/admin.registration.js";
 import { orderConfirmation } from "#templates/order.confirmation.js";
 import { resetPassword } from "#templates/reset.password.js";
+import { subscriptionRenewal } from "#templates/subscription.renewal.js";
 import { config } from "dotenv";
 config();
 
@@ -92,5 +93,26 @@ export const sendOrderStatusEmail = async (user, order, vendor) => {
     } catch (error) {
         console.error('Error sending order email:', error);
         return false
+    }
+};
+
+export const sendSubscriptionRenewalEmail = async (user, subscription) => {
+    try {
+        await transporter.sendMail({
+            from: process.env.EMAIL_USER,
+            to: user.email,
+            subject: subscription.pendingPlan
+                ? 'Your TetyHub plan change needs checkout'
+                : 'Your TetyHub subscription renews soon',
+            html: subscriptionRenewal({
+                firstname: user.firstname,
+                currentPeriodEnd: subscription.currentPeriodEnd,
+                pendingPlan: subscription.pendingPlan,
+            }),
+        });
+        return true;
+    } catch (error) {
+        console.error('Subscription renewal email failed:', error.message);
+        return false;
     }
 };

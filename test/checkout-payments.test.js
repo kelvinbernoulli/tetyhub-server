@@ -226,7 +226,7 @@ test('initialization commits and releases before provider request, retaining sta
     assert.ok(calls.some((x) => x.sql === 'COMMIT'));
     assert.ok(!calls.some((x) => x.sql.startsWith('DELETE')));
 });
-test('paystack signature is checked on raw bytes and duplicate delivery receives HTTP 200', async (t) => {
+test('paystack signature is checked on raw bytes and duplicate delivery is queued idempotently', async (t) => {
     const prior = process.env.PAYSTACK_SECRET_KEY;
     process.env.PAYSTACK_SECRET_KEY = 'test-secret';
     t.after(() => {
@@ -240,9 +240,7 @@ test('paystack signature is checked on raw bytes and duplicate delivery receives
         .createHmac('sha512', 'test-secret')
         .update(body)
         .digest('hex');
-    const settle = t.mock.method(Payment, 'settle', async () => ({
-        payment_status: 'paid',
-    }));
+    const calls = db(t);
     for (let i = 0; i < 2; i++) {
         const res = response();
         await paystackWebhook(
@@ -260,7 +258,12 @@ test('paystack signature is checked on raw bytes and duplicate delivery receives
         res
     );
     assert.equal(res.code, 401);
-    assert.equal(settle.mock.callCount(), 2);
+    assert.equal(
+        calls.filter((call) =>
+            call.sql.startsWith('INSERT INTO paystack_webhook_events')
+        ).length,
+        2
+    );
 });
 test('stripe webhook rejects unsigned requests', async () => {
     const res = response();

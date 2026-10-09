@@ -20,7 +20,7 @@ function database(t, options = {}) {
         if (sql.startsWith('INSERT INTO shipments')) return { rows: [{ ...shipment, status: 'pending' }] };
         if (sql.startsWith('UPDATE shipments')) return { rows: [{ ...shipment, status: options.next ?? 'delivered' }] };
         if (sql.startsWith('INSERT INTO shipment_tracking_history')) return { rows: [{ id: 10, status: options.next ?? 'delivered' }] };
-        if (sql.startsWith('SELECT vendor_id, status')) return { rows: options.shipments ?? [{ vendor_id: 3, status: options.next ?? 'delivered' }] };
+        if (sql.startsWith('SELECT vendor_id, status FROM shipments')) return { rows: options.shipments ?? [{ vendor_id: 3, status: options.next ?? 'delivered' }] };
         if (sql.startsWith('SELECT COUNT')) return { rows: [{ count: options.vendorCount ?? 1 }] };
         return { rows: [] };
     };

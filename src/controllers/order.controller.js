@@ -184,3 +184,50 @@ export const getOrderHistory = async (req, res) => {
         );
     }
 };
+
+export const confirmVendorDelivery = async (req, res) => {
+    try {
+        const userId = req.auth?.userId ?? req.session?.user?.id;
+        const orderId = Number(req.params.orderId);
+        const vendorId = Number(req.params.vendorId);
+        if (
+            !Number.isSafeInteger(orderId) || orderId < 1 ||
+            !Number.isSafeInteger(vendorId) || vendorId < 1
+        )
+            return respondWithError(
+                res,
+                400,
+                'Invalid order or vendor ID',
+                ERROR_CODES.VALIDATION_ERROR
+            );
+        const result = await Order.confirmVendorDelivery(
+            orderId,
+            userId,
+            vendorId
+        );
+        return respondWithSuccess(
+            res,
+            200,
+            'Vendor delivery confirmed',
+            result
+        );
+    } catch (error) {
+        const status = error instanceof Error && Number.isInteger(error.code)
+            ? error.code
+            : 500;
+        if (status >= 500)
+            console.error('Vendor delivery confirmation failed:', error);
+        return respondWithError(
+            res,
+            status,
+            status >= 500 ? 'Unable to confirm vendor delivery' : error.message,
+            status === 404
+                ? ERROR_CODES.RESOURCE_NOT_FOUND
+                : status === 409
+                  ? ERROR_CODES.RESOURCE_CONFLICT
+                  : status >= 500
+                    ? ERROR_CODES.INTERNAL_SERVER_ERROR
+                    : ERROR_CODES.VALIDATION_ERROR
+        );
+    }
+};

@@ -31,8 +31,10 @@ test('PostgreSQL migration, scoped reads and concurrent split-order delivery', {
             INSERT INTO shipments (order_id) VALUES (2), (3);
         `);
         await db.query(await readFile(new URL('../prisma/migrations/20260925120000_vendor_shipment_tracking/migration.sql', import.meta.url), 'utf8'));
+        await db.query(await readFile(new URL('../prisma/migrations/20261011090000_vendor_order_fulfillments/migration.sql', import.meta.url), 'utf8'));
         assert.equal((await db.query('SELECT vendor_id FROM shipments WHERE order_id = 2')).rows[0].vendor_id, 3);
         assert.equal((await db.query('SELECT vendor_id FROM shipments WHERE order_id = 3')).rows[0].vendor_id, null);
+        assert.equal((await db.query('SELECT COUNT(*)::int AS count FROM vendor_order_fulfillments WHERE order_id = 1')).rows[0].count, 2);
         t.mock.method(pool, 'connect', () => db.connect());
         t.mock.method(pool, 'query', (...args) => db.query(...args));
         t.mock.method(Notification, 'notifyShipmentUpdate', async () => {});
@@ -51,6 +53,10 @@ test('PostgreSQL migration, scoped reads and concurrent split-order delivery', {
         await assert.rejects(Shipment.createShipment(1, 3, {}), /already exists/);
         await assert.rejects(Shipment.createShipment(3, 3, {}), /reconciliation/);
         await Promise.all([Shipment.updateShipment(first.id, 3, { status: 'shipped' }, 30), Shipment.updateShipment(second.id, 4, { status: 'shipped' }, 40)]);
+        assert.deepEqual(
+            (await db.query('SELECT status FROM vendor_order_fulfillments WHERE order_id = 1 ORDER BY vendor_id')).rows.map(row => row.status),
+            ['shipped', 'shipped']
+        );
         await Promise.all([Shipment.addTrackingUpdate(first.id, 3, { status: 'delivered' }, 30), Shipment.addTrackingUpdate(second.id, 4, { status: 'delivered' }, 40)]);
         assert.equal((await db.query('SELECT status FROM orders WHERE id = 1')).rows[0].status, 'delivered');
         assert.equal((await db.query("SELECT COUNT(*)::int AS count FROM order_status_history WHERE order_id = 1 AND status = 'delivered'")).rows[0].count, 1);

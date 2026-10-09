@@ -18,6 +18,7 @@ import {
 import Payment from '../src/models/payment.model.js';
 import Order from '../src/models/order.model.js';
 import { Cart } from '../src/models/cart.model.js';
+import { PLAN_DEFINITIONS } from '../src/config/plans.js';
 
 const input = () => ({
     firstname: 'Test',
@@ -61,10 +62,47 @@ test('cart quantity updates require a variant for variant products', async (t) =
         { error: 'Choose a product variant', code: 422 });
     assert.ok(!calls.some(({ sql }) => sql.startsWith('UPDATE')));
 });
-function database(t, handler) {
+function database(t, handler, subscribedPlans = {}) {
     const calls = [];
     const query = async (sql, values = []) => {
         calls.push({ sql, values });
+        if (sql.includes('FROM subscriptions s')) {
+            const code = subscribedPlans[values[0]];
+            if (!code) return { rows: [] };
+            const plan = PLAN_DEFINITIONS[code];
+            return {
+                rows: [{
+                    plan: code,
+                    status: 'ACTIVE',
+                    planVersion: 1,
+                    currentPeriodEnd: new Date(Date.now() + 86400000),
+                    graceEndsAt: null,
+                    versionPlan: code,
+                    priceNaira: plan.priceNaira,
+                    commissionPercent: plan.commissionPercent,
+                    activeServices: plan.activeServices,
+                    packagesPerService: plan.packagesPerService,
+                    portfolioImages: plan.portfolioImages,
+                    promotedSlotsPerMonth: plan.promotedSlotsPerMonth,
+                    analytics: plan.analytics,
+                    support: plan.support,
+                }],
+            };
+        }
+        if (sql.includes('FROM plan_versions'))
+            return {
+                rows: Object.values(PLAN_DEFINITIONS).map((plan) => ({
+                    plan: plan.code,
+                    priceNaira: plan.priceNaira,
+                    commissionPercent: plan.commissionPercent,
+                    activeServices: plan.activeServices,
+                    packagesPerService: plan.packagesPerService,
+                    portfolioImages: plan.portfolioImages,
+                    promotedSlotsPerMonth: plan.promotedSlotsPerMonth,
+                    analytics: plan.analytics,
+                    support: plan.support,
+                })),
+            };
         const result = await handler(sql, values);
         return result ?? { rows: [], rowCount: 0 };
     };
@@ -288,7 +326,7 @@ test('payment outage preserves committed order and supports same-key retry', asy
         if (sql.startsWith('UPDATE products SET stock'))
             return { rows: [{ id: 2 }], rowCount: 1 };
         return quoteData(sql);
-    });
+    }, { 3: 'PRO' });
     t.mock.method(Payment, 'initiatePayment', async () => {
         assert.equal(calls.at(-1).sql, 'RELEASE');
         throw new Error('network');
@@ -297,6 +335,10 @@ test('payment outage preserves committed order and supports same-key retry', asy
     assert.equal(result.order_id, 5);
     assert.equal(result.payment, null);
     assert.equal(result.retryable, true);
+    const fulfillment = calls.find(({ sql }) =>
+        sql.startsWith('INSERT INTO vendor_order_fulfillments')
+    );
+    assert.deepEqual(fulfillment.values, [5, 3, '20.50', '10.00', '2.05', '18.45']);
     assert.equal((await processCheckout({ id: 1 }, data)).order_id, 5);
     assert.equal(inserts, 1);
     await assert.rejects(
@@ -373,6 +415,16 @@ test('zero-total checkout confirms without contacting a gateway', async (t) => {
     assert.equal(result.payment_status, 'paid');
     assert.ok(
         calls.some((x) =>
+            x.sql.startsWith('INSERT INTO vendor_order_fulfillments')
+        )
+    );
+    assert.ok(
+        calls.some((x) =>
+            x.sql.startsWith('UPDATE vendor_order_fulfillments SET status =')
+        )
+    );
+    assert.ok(
+        calls.some((x) =>
             x.sql.startsWith('INSERT INTO checkout_notifications')
         )
     );
@@ -382,6 +434,14 @@ test('vendor order reads constrain the aggregated items to the authorized vendor
     await Order.getOrderById(5, null, 7);
     assert.match(calls[0].sql, /oi.vendor_id = \$2/);
     assert.deepEqual(calls[0].values, [5, 7]);
-    await Order.fetchVendorOrders(7, {});
+    await Order.fetchVendorOrders(7, { status: 'processing' });
     assert.match(calls[1].sql, /oi.vendor_id = \$1/);
+    assert.match(calls[1].sql, /vof\.status = \$2/);
+});
+
+test('customer order detail exposes per-vendor fulfillment groups', async (t) => {
+    const calls = database(t, () => {});
+    await Order.getOrderById(5, 23);
+    assert.match(calls[0].sql, /AS vendor_fulfillments/);
+    assert.match(calls[0].sql, /FROM vendor_order_fulfillments vof WHERE vof\.order_id = o\.id/);
 });

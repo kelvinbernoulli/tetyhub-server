@@ -38,6 +38,19 @@ const endpoint =
                 );
             return respondWithSuccess(res, status, message, result);
         } catch (error) {
+            if (error.code === 'PLAN_LIMIT_REACHED') {
+                return res.status(403).json({
+                    success: false,
+                    message: error.message,
+                    result: null,
+                    code: error.code,
+                    limit: error.limit,
+                    limitName: error.limitName,
+                    currentCount: error.currentCount,
+                    requestedCount: error.requestedCount,
+                    planNeeded: error.planNeeded,
+                });
+            }
             const status =
                 error.status ??
                 (error.code === '23503'

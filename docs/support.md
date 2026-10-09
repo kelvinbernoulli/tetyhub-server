@@ -2,7 +2,7 @@
 
 All registered, active users can open tickets. Public API and vendor API reads are restricted to the authenticated user's own tickets. Platform support staff use the admin API; vendor staff do not receive access to other users' tickets.
 
-Apply `prisma/migrations/20260924120000_support_ticket_chat/migration.sql` through the project's normal Prisma migration deployment before running this version. It adds assignment and internal-note fields, indexes conversation history, and normalizes legacy categories, priorities and statuses. Existing closed tickets become resolved and can be reopened.
+Apply `prisma/migrations/20260924120000_support_ticket_chat/migration.sql` followed by `prisma/migrations/20261009010000_support_ticket_transfer/migration.sql` through the project's normal Prisma migration deployment before running this version. The first adds assignment and internal-note fields, indexes conversation history, and normalizes legacy categories, priorities and statuses. The second adds pending-transfer state. Existing closed tickets become resolved and can be reopened.
 
 ## User API
 
@@ -42,17 +42,17 @@ Users can PATCH `{ "status": "resolved" }` or `{ "status": "open" }`. A public u
 
 ## Staff API
 
-Base path: `/v1/api/admin`. The same paths apply, plus `GET /support-tickets/agents` for eligible assignee user IDs and names. The legacy `/support-tickets/view/:ticketId` detail path remains available.
+Base path: `/v1/api/admin`. Staff can use `GET /support-tickets/agents` to list eligible assignee user IDs and names, and `PATCH /support-tickets/:ticketId` to update status or priority. The current assignee can request a handoff with `POST /support-tickets/:ticketId/transfer` and `{ "assigned_to": <userId> }`. The proposed assignee accepts or declines with `PATCH /support-tickets/:ticketId/transfer/decision` and `{ "decision": "accept" }` or `{ "decision": "decline" }`. The ticket remains with its current assignee until accepted. A support admin cannot directly change assignment; a super admin can override with `PATCH /support-tickets/:ticketId` and `assigned_to`. The legacy `/support-tickets/view/:ticketId` detail path remains available.
 
 The admin router requires an active platform administrator. All support routes require `support.can_read`; replies and updates additionally require `support.can_update`; creation requires `support.can_create`. Super administrators retain the existing permission bypass.
 
-Staff can filter all tickets and PATCH `status`, `priority`, or `assigned_to` (a user ID, or null to unassign). Assignees must be active platform staff with current support read/update permissions, or active super administrators.
+New tickets are automatically assigned to the eligible support agent with the fewest unresolved tickets (`open`, `in_progress`, or `waiting_on_user`); ties are broken by user ID. Assignment selection is serialized across concurrent ticket creations so simultaneous tickets do not all choose from a stale workload snapshot. If no eligible agent is available, the ticket remains unassigned. Support admins can update ticket status and priority; assignment changes use the transfer flow, except super admins can directly assign or unassign as an override. Assignees and proposed assignees must be active platform staff with current support read/update permissions, or active super administrators.
 
 Private notes use the reply endpoint with `is_internal: true`. They are returned only through the staff API, excluded from user reply counts/history, do not change public activity/status, and do not notify users. Messages are append-only.
 
 ## Notifications
 
-In-app notifications are written in the same transaction as public ticket changes. New tickets alert eligible support agents; user replies alert the eligible assignee, falling back to the support team. Staff public replies alert the owner. Assignment alerts the new assignee. Notifications contain ticket references, not message bodies or notes.
+In-app notifications are written in the same transaction as ticket changes. New tickets alert their assigned agent; if a ticket is unassigned, new-ticket notifications go to eligible support agents. User replies alert the eligible assignee, falling back to the support team. Staff public replies alert the owner. A transfer request alerts the proposed assignee; acceptance alerts the previous assignee and ticket owner; decline alerts the requesting assignee. A super-admin override notifies the ticket owner and affected assignees, including any proposed assignee whose pending transfer was cleared. Notifications contain ticket references and transfer state, not message bodies or internal notes.
 
 All authenticated users can use `/v1/api/notifications`, `/notifications/unread-count`, `/notifications/:notificationId`, `/notifications/:notificationId/read`, and `/notifications/mark-all-read`. Reads and updates remain scoped to the caller.
 

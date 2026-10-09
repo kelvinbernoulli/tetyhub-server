@@ -5,12 +5,16 @@ import SupportTicket from '../src/models/support.tickets.model.js';
 import SupportTicketReply from '../src/models/support.ticket.replies.model.js';
 import {
     replyToTicket,
+    requestTicketTransfer,
+    respondToTicketTransfer,
     updateTicket,
     createTicketWithOpeningMessage,
 } from '../src/services/support.js';
 import {
     supportTicketSchema,
     ticketReplySchema,
+    ticketTransferDecisionSchema,
+    ticketTransferRequestSchema,
     ticketUpdateSchema,
 } from '../src/schemas/support.tickets.schema.js';
 import {
@@ -66,6 +70,8 @@ test('ticket and message validation reject blank content, forged attachments and
             .error
     );
     assert.ok(ticketUpdateSchema.validate({ status: 'deleted' }).error);
+    assert.ok(ticketTransferRequestSchema.validate({ assigned_to: -1 }).error);
+    assert.ok(ticketTransferDecisionSchema.validate({ decision: 'maybe' }).error);
     assert.equal(
         ticketReplySchema.validate({
             attachment: 'data:application/pdf;base64,JVBERi0xLjQ=',
@@ -175,6 +181,35 @@ test('internal notes stay private and do not alter public activity', async (t) =
     );
 });
 
+test('only assigned admins or super admins can reply to a ticket', async (t) => {
+    const calls = database(t);
+    const otherAdmin = { userId: 99, role: 'admin', supportStaff: true };
+    await assert.rejects(
+        replyToTicket(10, otherAdmin, { message: 'Not assigned' }),
+        { status: 403 }
+    );
+    await replyToTicket(10, { userId: 77, role: 'super_admin', supportStaff: true }, {
+        message: 'Escalated by super admin',
+    });
+    assert.ok(
+        calls.some(({ sql }) => sql.includes('INSERT INTO support_ticket_replies'))
+    );
+});
+
+test('admins cannot reply to unassigned tickets', async (t) => {
+    const calls = database(t, (sql) =>
+        sql.includes('SELECT * FROM support_tickets')
+            ? { rows: [{ ...ticket, assigned_to: null }] }
+            : undefined
+    );
+
+    await assert.rejects(
+        replyToTicket(10, staff, { message: 'Reply to unassigned ticket' }),
+        { status: 403 }
+    );
+    assert.ok(!calls.some(({ sql }) => sql.includes('INSERT INTO support_ticket_replies')));
+});
+
 test('users cannot assign or progress tickets and staff cannot assign inactive agents', async (t) => {
     const calls = database(t);
     await assert.rejects(updateTicket(10, owner, { assigned_to: 2 }), {
@@ -185,8 +220,18 @@ test('users cannot assign or progress tickets and staff cannot assign inactive a
     });
     assert.equal(calls.length, 0);
     await assert.rejects(updateTicket(10, staff, { assigned_to: 999 }), {
-        status: 400,
+        status: 403,
     });
+    await assert.rejects(
+        updateTicket(
+            10,
+            { userId: 77, role: 'super_admin', supportStaff: true },
+            { assigned_to: 999 }
+        ),
+        {
+        status: 400,
+        }
+    );
     assert.ok(!calls.some(({ sql }) => sql.includes('UPDATE support_tickets')));
 });
 
@@ -205,6 +250,207 @@ test('creation rolls back the ticket when its opening message fails', async (t) 
         /write failed/
     );
     assert.equal(calls.at(-2).sql, 'ROLLBACK');
+});
+
+test('new tickets are assigned to the least-loaded eligible support agent', async (t) => {
+    const calls = database(t);
+    await createTicketWithOpeningMessage(owner, {
+        subject: 'Help',
+        message: 'Please help',
+        category: 'general',
+        priority: 'medium',
+    });
+
+    const lockIndex = calls.findIndex(({ sql }) =>
+        sql.includes('pg_advisory_xact_lock')
+    );
+    const selectionIndex = calls.findIndex(({ sql }) =>
+        sql.includes('SELECT staff.id FROM')
+    );
+    const insert = calls.find(({ sql }) =>
+        sql.includes('INSERT INTO support_tickets')
+    );
+
+    assert.ok(lockIndex >= 0 && selectionIndex > lockIndex);
+    assert.match(calls[selectionIndex].sql, /COUNT\(\*\)/);
+    assert.match(calls[selectionIndex].sql, /'open', 'in_progress', 'waiting_on_user'/);
+    assert.match(calls[selectionIndex].sql, /ORDER BY[\s\S]*staff\.id/);
+    assert.equal(insert.values[6], 2);
+});
+
+test('current assignee can request a transfer and proposed agent is notified', async (t) => {
+    const openTicket = { ...ticket, status: 'open', assigned_to: 2 };
+    const calls = database(t, (sql) => {
+        if (sql.includes('SELECT * FROM support_tickets'))
+            return { rows: [openTicket] };
+        if (sql.includes('SELECT u.id, u.firstname, u.lastname FROM users'))
+            return { rows: [{ id: 2 }, { id: 3 }] };
+        if (sql.includes('UPDATE support_tickets'))
+            return { rows: [{ ...openTicket, pending_assigned_to: 3 }] };
+        if (sql.includes('INSERT INTO notifications'))
+            return { rows: [] };
+        return undefined;
+    });
+
+    await requestTicketTransfer(10, staff, { assigned_to: 3 });
+
+    const update = calls.find(({ sql }) => sql.includes('UPDATE support_tickets'));
+    const notification = calls.find(({ sql }) =>
+        sql.includes('INSERT INTO notifications')
+    );
+    assert.deepEqual(update.values, [3, 2, update.values[2], 10]);
+    assert.equal(update.values[2] instanceof Date, true);
+    assert.deepEqual(notification.values[0], [3]);
+    assert.equal(notification.values[2], 'Ticket transfer requested');
+    assert.match(notification.values[4], /"status":"pending"/);
+});
+
+test('only the current assignee can request a transfer', async (t) => {
+    const openTicket = { ...ticket, status: 'open', assigned_to: 2 };
+    const calls = database(t, (sql) =>
+        sql.includes('SELECT * FROM support_tickets')
+            ? { rows: [openTicket] }
+            : undefined
+    );
+
+    await assert.rejects(
+        requestTicketTransfer(
+            10,
+            { userId: 99, role: 'admin', supportStaff: true },
+            { assigned_to: 3 }
+        ),
+        { status: 403 }
+    );
+    assert.ok(!calls.some(({ sql }) => sql.includes('UPDATE support_tickets')));
+});
+
+test('proposed agent acceptance transfers ownership and notifies requester and ticket owner', async (t) => {
+    const pendingTicket = {
+        ...ticket,
+        status: 'open',
+        assigned_to: 2,
+        pending_assigned_to: 3,
+        transfer_requested_by: 2,
+    };
+    const calls = database(t, (sql) => {
+        if (sql.includes('SELECT * FROM support_tickets'))
+            return { rows: [pendingTicket] };
+        if (sql.includes('SELECT u.id, u.firstname, u.lastname FROM users'))
+            return { rows: [{ id: 2 }, { id: 3 }] };
+        if (sql.includes('UPDATE support_tickets'))
+            return { rows: [{ ...pendingTicket, assigned_to: 3 }] };
+        if (sql.includes('INSERT INTO notifications'))
+            return { rows: [] };
+        return undefined;
+    });
+
+    await respondToTicketTransfer(
+        10,
+        { userId: 3, role: 'admin', supportStaff: true },
+        { decision: 'accept' }
+    );
+
+    const update = calls.find(({ sql }) => sql.includes('UPDATE support_tickets'));
+    const notification = calls.find(({ sql }) =>
+        sql.includes('INSERT INTO notifications')
+    );
+    assert.deepEqual(update.values, [3, null, null, null, 10]);
+    assert.deepEqual(notification.values[0], [2, 1]);
+    assert.equal(notification.values[2], 'Ticket transfer accepted');
+    assert.match(notification.values[4], /"status":"accepted"/);
+});
+
+test('only the proposed assignee can decide a pending transfer', async (t) => {
+    const pendingTicket = {
+        ...ticket,
+        status: 'open',
+        assigned_to: 2,
+        pending_assigned_to: 3,
+        transfer_requested_by: 2,
+    };
+    const calls = database(t, (sql) =>
+        sql.includes('SELECT * FROM support_tickets')
+            ? { rows: [pendingTicket] }
+            : undefined
+    );
+
+    await assert.rejects(
+        respondToTicketTransfer(
+            10,
+            { userId: 4, role: 'admin', supportStaff: true },
+            { decision: 'accept' }
+        ),
+        { status: 403 }
+    );
+    assert.ok(!calls.some(({ sql }) => sql.includes('UPDATE support_tickets')));
+});
+
+test('proposed agent decline leaves the current assignee in place and notifies requester', async (t) => {
+    const pendingTicket = {
+        ...ticket,
+        status: 'open',
+        assigned_to: 2,
+        pending_assigned_to: 3,
+        transfer_requested_by: 2,
+    };
+    const calls = database(t, (sql) => {
+        if (sql.includes('SELECT * FROM support_tickets'))
+            return { rows: [pendingTicket] };
+        if (sql.includes('UPDATE support_tickets'))
+            return { rows: [{ ...pendingTicket, pending_assigned_to: null }] };
+        if (sql.includes('INSERT INTO notifications'))
+            return { rows: [] };
+        return undefined;
+    });
+
+    await respondToTicketTransfer(
+        10,
+        { userId: 3, role: 'admin', supportStaff: true },
+        { decision: 'decline' }
+    );
+
+    const update = calls.find(({ sql }) => sql.includes('UPDATE support_tickets'));
+    const notification = calls.find(({ sql }) =>
+        sql.includes('INSERT INTO notifications')
+    );
+    assert.deepEqual(update.values, [null, null, null, 10]);
+    assert.deepEqual(notification.values[0], [2]);
+    assert.equal(notification.values[2], 'Ticket transfer declined');
+    assert.match(notification.values[4], /"status":"declined"/);
+});
+
+test('super-admin reassignment clears a pending transfer and notifies affected agents', async (t) => {
+    const pendingTicket = {
+        ...ticket,
+        assigned_to: 2,
+        pending_assigned_to: 3,
+        transfer_requested_by: 2,
+    };
+    const calls = database(t, (sql) => {
+        if (sql.includes('SELECT * FROM support_tickets'))
+            return { rows: [pendingTicket] };
+        if (sql.includes('SELECT u.id, u.firstname, u.lastname FROM users'))
+            return { rows: [{ id: 2 }, { id: 3 }, { id: 4 }] };
+        if (sql.includes('UPDATE support_tickets'))
+            return { rows: [{ ...pendingTicket, assigned_to: 4 }] };
+        if (sql.includes('INSERT INTO notifications'))
+            return { rows: [] };
+        return undefined;
+    });
+
+    await updateTicket(
+        10,
+        { userId: 77, role: 'super_admin', supportStaff: true },
+        { assigned_to: 4 }
+    );
+
+    const update = calls.find(({ sql }) => sql.includes('UPDATE support_tickets'));
+    const notifications = calls.filter(({ sql }) =>
+        sql.includes('INSERT INTO notifications')
+    );
+    assert.deepEqual(update.values, [4, null, null, null, 10]);
+    assert.ok(notifications.some(({ values }) => values[0].includes(2)));
+    assert.ok(notifications.some(({ values }) => values[0].includes(3)));
 });
 
 test('controllers return 400 for malformed IDs and 404 before uploading unauthorized replies', async (t) => {
@@ -229,4 +475,37 @@ test('controllers return 400 for malformed IDs and 404 before uploading unauthor
         res
     );
     assert.equal(res.statusCode, 404);
+});
+
+test('support staff context lets an admin reply to a customer ticket', async (t) => {
+    const calls = database(t);
+    const res = {
+        status(code) {
+            this.statusCode = code;
+            return this;
+        },
+        json(body) {
+            this.body = body;
+            return this;
+        },
+    };
+
+    await replyToSupportTicket(
+        {
+            auth: staff,
+            supportStaff: true,
+            params: { ticketId: '10' },
+            body: { message: 'We are looking into this' },
+        },
+        res
+    );
+
+    assert.equal(res.statusCode, 201);
+    assert.ok(
+        calls.some(
+            ({ sql, values }) =>
+                sql.includes('SELECT * FROM support_tickets') &&
+                values[1] === true
+        )
+    );
 });

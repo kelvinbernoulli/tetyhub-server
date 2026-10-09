@@ -1,4 +1,10 @@
 import { notifyOrder, notifyLowStock } from '#services/notifications.js';
+import { vendorSaleAllocations } from '#utils/commission.js';
+import { recordProductSale } from '#services/marketplace-ledger.js';
+import {
+    getProviderPlan,
+    lockProviderEntitlements,
+} from '#services/entitlements.js';
 import { createHash, randomUUID } from 'node:crypto';
 import pool from './pg_pool.js';
 import Payment from '#models/payment.model.js';
@@ -187,6 +193,21 @@ export async function processCheckout(user, data) {
             'Checkout total changed; refresh your checkout preview',
             409
         );
+        const vendorIds = [
+            ...new Set(preview.items.map((item) => item.vendor_id)),
+        ].sort((a, b) => a - b);
+        const commissionRates = new Map();
+        for (const vendorId of vendorIds) {
+            await lockProviderEntitlements(client, vendorId);
+            const { plan } = await getProviderPlan(client, vendorId);
+            commissionRates.set(vendorId, plan.commissionPercent);
+        }
+        const allocations = vendorSaleAllocations(
+            preview.items,
+            preview.coupon,
+            preview.discount,
+            commissionRates
+        );
 
         const { rows } = await client.query(
             `INSERT INTO orders
@@ -241,6 +262,29 @@ export async function processCheckout(user, data) {
                 await notifyLowStock(client, item);
             }
         }
+        for (const allocation of allocations) {
+            await client.query(
+                `INSERT INTO vendor_order_fulfillments
+                 (order_id, vendor_id, gross_amount, commission_rate, commission_amount, net_amount)
+                 VALUES ($1, $2, $3, $4, $5, $6)
+                 ON CONFLICT (order_id, vendor_id) DO NOTHING`,
+                [
+                    order.id,
+                    allocation.vendorId,
+                    allocation.grossAmount,
+                    allocation.commissionRate,
+                    allocation.commissionAmount,
+                    allocation.netAmount,
+                ]
+            );
+        }
+        await client.query(
+            `INSERT INTO vendor_order_fulfillment_history
+             (fulfillment_id, status, note, changed_by)
+             SELECT id, status, 'Checkout created', $2
+             FROM vendor_order_fulfillments WHERE order_id = $1`,
+            [order.id, user.id]
+        );
         await client.query(
             `INSERT INTO shipping_addresses (order_id,user_id,firstname,lastname,phone_one,phone_two,address,city,state,country,zip_code)
             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
@@ -282,6 +326,17 @@ export async function processCheckout(user, data) {
                 [order.id]
             );
             await client.query(
+                "UPDATE vendor_order_fulfillments SET status = 'processing', updated_at = NOW() WHERE order_id = $1",
+                [order.id]
+            );
+            await client.query(
+                `INSERT INTO vendor_order_fulfillment_history
+                 (fulfillment_id, status, note, changed_by)
+                 SELECT id, status, 'Zero-total checkout completed', $2
+                 FROM vendor_order_fulfillments WHERE order_id = $1`,
+                [order.id, user.id]
+            );
+            await client.query(
                 "INSERT INTO order_status_history (order_id, status, note, changed_by) VALUES ($1, 'processing', 'Zero-total checkout completed', $2)",
                 [order.id, user.id]
             );
@@ -291,6 +346,7 @@ export async function processCheckout(user, data) {
                 'INSERT INTO checkout_notifications (order_id) VALUES ($1) ON CONFLICT (order_id) DO NOTHING',
                 [order.id]
             );
+            await recordProductSale(client, order.id);
         }
         await notifyOrder(client, order, order.status, { vendors: order.payment_status === 'paid' });
         return order;
@@ -363,6 +419,16 @@ export async function releaseReservation(client, order, reason) {
     await client.query(
         "UPDATE orders SET status = 'cancelled', reservation_expires_at = NULL, updated_at = NOW() WHERE id = $1",
         [order.id]
+    );
+    await client.query(
+        "UPDATE vendor_order_fulfillments SET status = 'cancelled', updated_at = NOW() WHERE order_id = $1",
+        [order.id]
+    );
+    await client.query(
+        `INSERT INTO vendor_order_fulfillment_history
+         (fulfillment_id, status, note)
+         SELECT id, status, $2 FROM vendor_order_fulfillments WHERE order_id = $1`,
+        [order.id, reason]
     );
     await client.query(
         "INSERT INTO order_status_history (order_id,status,note) VALUES ($1,'cancelled',$2)",

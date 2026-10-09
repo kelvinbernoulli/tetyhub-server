@@ -13,6 +13,8 @@ import * as TransactionHistoryController from "#controllers/transaction.history.
 import * as AdminTypesController from "#controllers/admin.type.controller.js";
 import * as CouponsController from "#controllers/coupon.controller.js";
 import * as ServicesController from "#controllers/services.controller.js";
+import * as ServicePackagesController from "#controllers/service-packages.controller.js";
+import * as SubscriptionController from "#controllers/subscription.controller.js";
 import pagination from "#middlewares/pagination.middleware.js";
 import { Router } from "express";
 import {
@@ -56,10 +58,23 @@ router.post("/service/create", canCreate('services'), ServicesController.createS
 router.get("/services", canRead('services'), pagination, ServicesController.fetchServices);
 router.get("/service/view/:id", canRead('services'), ServicesController.viewService);
 router.patch("/service/update/:id", canUpdate('services'), ServicesController.updateService);
+router.get("/services/:serviceId/packages", canRead('services'), ServicePackagesController.list);
+router.post("/services/:serviceId/packages", canCreate('services'), ServicePackagesController.create);
+router.patch("/services/:serviceId/packages/:packageId", canUpdate('services'), ServicePackagesController.update);
+router.delete("/services/:serviceId/packages/:packageId", canDelete('services'), ServicePackagesController.remove);
+
+//subscriptions
+router.get("/subscriptions/me", SubscriptionController.getMe);
+router.post("/subscriptions/trial", SubscriptionController.startTrial);
+router.post("/subscriptions/checkout", SubscriptionController.checkout);
+router.post("/subscriptions/downgrade", SubscriptionController.downgrade);
+router.post("/subscriptions/cancel", SubscriptionController.cancel);
 
 //bookings (service permissions govern service fulfillment)
 router.get('/bookings', canRead('services'), BookingController.vendorList);
 router.get('/bookings/:bookingId', canRead('services'), BookingController.vendorView);
+router.patch('/bookings/:bookingId/decision', canUpdate('services'), BookingController.vendorDecision);
+router.patch('/bookings/:bookingId/reschedule', canUpdate('services'), BookingController.vendorProposeReschedule);
 router.patch('/bookings/:bookingId/status', canUpdate('services'), BookingController.vendorStatus);
 router.patch('/bookings/:bookingId/cancel', canUpdate('services'), BookingController.vendorCancel);
 

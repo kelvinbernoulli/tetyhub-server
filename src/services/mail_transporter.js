@@ -2,6 +2,7 @@ import nodemailer from 'nodemailer';
 import { config } from 'dotenv';
 config();
 
+
 export const transporter = nodemailer.createTransport({
     host: process.env.MAILER_HOST,
     port: process.env.MAILER_PORT || 2525,

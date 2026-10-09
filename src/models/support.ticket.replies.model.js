@@ -17,8 +17,13 @@ export default class SupportTicketReply {
         return result.rows[0];
     }
 
-    static async findByTicket(ticketId, actor, { after = 0, limit = 50 } = {}) {
-        const result = await pool.query(
+    static async findByTicket(
+        ticketId,
+        actor,
+        { after = 0, limit = 50 } = {},
+        client = pool
+    ) {
+        const result = await client.query(
             `SELECT r.*, u.firstname, u.lastname, u.role
              FROM support_ticket_replies r JOIN users u ON u.id = r.user_id
              JOIN support_tickets t ON t.id = r.ticket_id

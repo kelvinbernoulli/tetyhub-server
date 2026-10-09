@@ -19,8 +19,13 @@ import admin from '#routes/admin.routes.js';
 // import user from "#routes/user.routes.js";
 import vendor from '#routes/vendor.routes.js';
 import web from '#routes/web.routes.js';
-import { paystackWebhook, stripeWebhook } from '#services/webhook.js';
+import {
+    paystackWebhook,
+    stripeWebhook,
+    startPaystackWebhookWorker,
+} from '#services/webhook.js';
 import { startCheckoutWorker } from '#services/checkout.worker.js';
+import { startSubscriptionLifecycleJob } from '#services/subscription-lifecycle.service.js';
 import passport from 'passport';
 import sessionMiddleware from '#config/session.js';
 
@@ -168,6 +173,8 @@ app.use((err, req, res, next) => {
 const server = app.listen(PORT, () => {
     console.log(`Server running on port ${PORT} — http://localhost:${PORT}/`);
 });
+startPaystackWebhookWorker();
+startSubscriptionLifecycleJob();
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));

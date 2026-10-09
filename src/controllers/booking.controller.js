@@ -7,6 +7,9 @@ import {
     bookingListSchema,
     cancelBookingSchema,
     bookingStatusSchema,
+    bookingDecisionSchema,
+    bookingRescheduleProposalSchema,
+    bookingRescheduleResponseSchema,
 } from '#schemas/booking.schema.js';
 import { CheckoutError } from '#utils/checkout.js';
 import ERROR_CODES from '#utils/error.codes.js';
@@ -63,7 +66,7 @@ export const availability = endpoint(
 export const create = endpoint(
     (req) =>
         Booking.create(owner(req), validate(createBookingSchema, req.body)),
-    'Booking reserved; complete payment before expiry',
+    'Booking request sent to vendor',
     200
 );
 export const list = endpoint(
@@ -121,4 +124,31 @@ export const vendorStatus = endpoint(
             validate(bookingStatusSchema, req.body)
         ),
     'Booking status updated'
+);
+export const vendorDecision = endpoint(
+    (req) =>
+        Booking.decide(
+            id(req),
+            owner(req, true),
+            validate(bookingDecisionSchema, req.body)
+        ),
+    'Booking decision recorded'
+);
+export const vendorProposeReschedule = endpoint(
+    (req) =>
+        Booking.proposeReschedule(
+            id(req),
+            owner(req, true),
+            validate(bookingRescheduleProposalSchema, req.body).scheduled_for
+        ),
+    'Reschedule proposal sent to buyer'
+);
+export const respondToReschedule = endpoint(
+    (req) =>
+        Booking.respondToReschedule(
+            id(req),
+            owner(req),
+            validate(bookingRescheduleResponseSchema, req.body).accept
+        ),
+    'Reschedule response recorded'
 );

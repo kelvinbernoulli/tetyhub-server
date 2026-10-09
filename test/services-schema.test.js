@@ -114,5 +114,5 @@ test('service media validates required thumbnail, formats and size limits', () =
         `data:image/png;base64,${Buffer.alloc(2 * 1024 * 1024 + 1).toString('base64')}`,
     ])
         assert.ok(update.validate({ thumbnail }).error);
-    assert.ok(update.validate({ images: Array(6).fill(thumbnail) }).error);
+    assert.ok(update.validate({ images: Array(101).fill(thumbnail) }).error);
 });

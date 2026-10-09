@@ -105,17 +105,28 @@ class Return {
                     ]
                 );
             }
-
-            // 6. Update order status to returned
             await client.query(
-                `UPDATE orders SET status = 'returned', updated_at = NOW() WHERE id = $1`,
+                `UPDATE vendor_order_fulfillments SET payout_status = 'disputed',
+                 updated_at = NOW() WHERE order_id = $1 AND vendor_id = $2
+                 AND payout_status IN ('held', 'eligible')`,
+                [orderId, returnVendorId]
+            );
+
+            const { rows: vendorCountRows } = await client.query(
+                `SELECT COUNT(DISTINCT vendor_id)::int AS count
+                 FROM order_items WHERE order_id = $1 AND product_id IS NOT NULL`,
                 [orderId]
             );
-
-            await client.query(
-                "INSERT INTO order_status_history (order_id, status, note, changed_by) VALUES ($1, 'returned', 'Return requested', $2)",
-                [orderId, userId]
-            );
+            if (vendorCountRows[0]?.count === 1) {
+                await client.query(
+                    `UPDATE orders SET status = 'returned', updated_at = NOW() WHERE id = $1`,
+                    [orderId]
+                );
+                await client.query(
+                    "INSERT INTO order_status_history (order_id, status, note, changed_by) VALUES ($1, 'returned', 'Return requested', $2)",
+                    [orderId, userId]
+                );
+            }
             await notifyReturn(client, returnRequest, 'pending', { vendors: true });
             await client.query('COMMIT');
             return returnRequest;

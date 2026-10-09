@@ -7,6 +7,8 @@ import * as AdminTypesController from "#controllers/admin.type.controller.js";
 import * as AdminsController from "#controllers/admin.controller.js";
 import * as PermissionsController from "#controllers/permission.controller.js";
 import * as TransactionHistoryController from "#controllers/transaction.history.controller.js";
+import * as CommissionController from "#controllers/commission.controller.js";
+import * as SubscriptionPlansController from "#controllers/subscription-plans.controller.js";
 import * as ReturnController from "#controllers/return.controller.js";
 import * as CategoriesController from '#controllers/categories.controller.js'
 import * as SubcategoriesController from '#controllers/subcategories.controller.js'
@@ -16,6 +18,10 @@ import pagination from "#middlewares/pagination.middleware.js";
 import { Router } from "express";
 import { authenticated, canCreate, canDelete, canRead, canUpdate, isAllAdmin, isSuperAdmin, requireCsrfProtection, requireRecentAuthentication } from "#middlewares/auth.middleware.js";
 const router = Router();
+const supportStaffContext = (req, res, next) => {
+    req.supportStaff = true;
+    next();
+};
 
 // The entire platform-admin surface is deny-by-default. Public storefront
 // reads live on web.routes.js.
@@ -57,15 +63,24 @@ router.patch("/childcategory/update/:ChildcategoryId", canUpdate('categories'), 
 router.delete("/childcategory/delete/:ChildcategoryId", canDelete('categories'), ChildcategoriesController.deleteChildcategory);
 
 //support tickets
-router.post("/support-tickets/create", canCreate('support'), supportTicketsController.createSupportTicket);
-router.patch("/support-tickets/:ticketId/reply", canUpdate('support'), supportTicketsController.replyToSupportTicket);
-router.get("/support-tickets", canRead('support'), pagination, supportTicketsController.fetchSupportTickets);
-router.get("/support-tickets/view/:ticketId", canRead('support'), supportTicketsController.getSupportTicket);
+router.post("/support-tickets/create", canCreate('support'), supportStaffContext, supportTicketsController.createSupportTicket);
+router.patch("/support-tickets/:ticketId/reply", canUpdate('support'), supportStaffContext, supportTicketsController.replyToSupportTicket);
+router.get("/support-tickets", canRead('support'), supportStaffContext, pagination, supportTicketsController.fetchSupportTickets);
+router.get("/support-tickets/agents", canRead('support'), supportStaffContext, supportTicketsController.fetchSupportAgents);
+router.post("/support-tickets/:ticketId/transfer", canUpdate('support'), supportStaffContext, supportTicketsController.requestSupportTicketTransfer);
+router.patch("/support-tickets/:ticketId/transfer/decision", canUpdate('support'), supportStaffContext, supportTicketsController.respondToSupportTicketTransfer);
+router.patch("/support-tickets/:ticketId", canUpdate('support'), supportStaffContext, supportTicketsController.updateSupportTicket);
+router.get("/support-tickets/view/:ticketId", canRead('support'), supportStaffContext, supportTicketsController.getSupportTicket);
 // router.delete("/support-tickets/:ticketId", authenticated, canDelete('support'), supportTicketsController.deleteGeneralSupportTicket);
 
 //settings
 router.get("/settings", canRead('settings'), pagination, settingsController.fetchGeneralSettings);
 router.patch("/settings/upsert", canUpdate('settings'), settingsController.upsertGeneralSettings);
+router.get("/commission-rates", canRead('settings'), CommissionController.getRates);
+router.patch("/commission-rates", canUpdate('settings'), requireRecentAuthentication(), CommissionController.updateRates);
+router.get("/commission-rates/history", canRead('settings'), pagination, CommissionController.getRateHistory);
+router.get("/subscription-plans", canRead('settings'), SubscriptionPlansController.list);
+router.patch("/subscription-plans/:plan", canUpdate('settings'), requireRecentAuthentication(), SubscriptionPlansController.publish);
 
 //admin types
 router.post("/admin-type/create", isSuperAdmin, requireRecentAuthentication(), AdminTypesController.createAdminTypes);

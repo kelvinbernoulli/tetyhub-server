@@ -39,8 +39,9 @@ test(
             CREATE TABLE admin_types (id SERIAL PRIMARY KEY, slug TEXT, scope TEXT, status BOOLEAN);
             CREATE TABLE admin_permissions (admin_id INTEGER, admin_type_id INTEGER, status BOOLEAN, can_read BOOLEAN, expires_at TIMESTAMP);
             CREATE TABLE notifications (id SERIAL PRIMARY KEY, user_id INTEGER REFERENCES users(id), type TEXT, title TEXT, message TEXT, metadata TEXT, read_at TIMESTAMP, created_at TIMESTAMP DEFAULT NOW());
-            CREATE TABLE orders (id SERIAL PRIMARY KEY, user_id INTEGER REFERENCES users(id), status TEXT DEFAULT 'pending', updated_at TIMESTAMP);
+            CREATE TABLE orders (id SERIAL PRIMARY KEY, user_id INTEGER REFERENCES users(id), order_number TEXT, status TEXT DEFAULT 'pending', payment_status TEXT DEFAULT 'paid', updated_at TIMESTAMP);
             CREATE TABLE order_items (id SERIAL PRIMARY KEY, order_id INTEGER, vendor_id INTEGER, quantity INTEGER, price NUMERIC);
+            CREATE TABLE vendor_order_fulfillments (id SERIAL PRIMARY KEY, order_id INTEGER, vendor_id INTEGER, status TEXT DEFAULT 'processing', updated_at TIMESTAMP, UNIQUE(order_id, vendor_id));
             CREATE TABLE order_status_history (order_id INTEGER, status TEXT, note TEXT, changed_by INTEGER);
             CREATE TABLE shipments (id SERIAL PRIMARY KEY, order_id INTEGER UNIQUE, tracking_number TEXT, carrier TEXT, shipping_method TEXT, estimated_delivery TIMESTAMP, shipping_cost NUMERIC, status TEXT, notes TEXT, updated_at TIMESTAMP);
             CREATE TABLE shipment_tracking_history (id SERIAL PRIMARY KEY, shipment_id INTEGER, status TEXT, location TEXT, description TEXT);
@@ -53,6 +54,7 @@ test(
             INSERT INTO admin_permissions VALUES (1,1,true,true,NULL),(2,1,true,true,NULL),(1,2,true,true,NOW()-INTERVAL '1 day'),(3,3,true,true,NULL);
             INSERT INTO orders (user_id, status) VALUES (1,'processing');
             INSERT INTO order_items (order_id,vendor_id,quantity,price) VALUES (1,1,2,10);
+            INSERT INTO vendor_order_fulfillments (order_id,vendor_id,status) VALUES (1,1,'processing');
         `);
             await db.query(
                 await readFile(
@@ -181,7 +183,7 @@ test(
             await db.query(
                 'INSERT INTO order_items (order_id,vendor_id,quantity,price) VALUES (1,999,1,10)'
             );
-            const rejected = await Order.updateOrderStatus(1, 1, 2, {
+            const rejected = await Order.updateOrderStatus(1, 999, 2, {
                 status: 'refunded',
             });
             assert.equal(rejected.code, 404);

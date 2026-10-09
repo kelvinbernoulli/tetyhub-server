@@ -115,10 +115,9 @@ export const ticketReplySchema = Joi.object({
 
     attachment,
 
-    is_internal: Joi.boolean()
-        .strict()
+    is_internal: Joi.boolean().strict().valid(true, false)
 })
-.or('message', 'attachment');
+    .or('message', 'attachment');
 
 
 export const ticketUpdateSchema = Joi.object({
@@ -131,7 +130,20 @@ export const ticketUpdateSchema = Joi.object({
         .positive()
         .allow(null)
 })
-.min(1);
+    .min(1);
+
+export const ticketTransferRequestSchema = Joi.object({
+    assigned_to: Joi.number()
+        .integer()
+        .positive()
+        .required()
+});
+
+export const ticketTransferDecisionSchema = Joi.object({
+    decision: Joi.string()
+        .valid('accept', 'decline')
+        .required()
+});
 
 
 export const ticketFilterSchema = Joi.object({

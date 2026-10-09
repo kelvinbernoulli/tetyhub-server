@@ -9,12 +9,17 @@ import * as Controller from '../src/controllers/booking.controller.js';
 import {
     createBookingSchema,
     bookingListSchema,
+    bookingDecisionSchema,
+    bookingRescheduleProposalSchema,
+    bookingRescheduleResponseSchema,
 } from '../src/schemas/booking.schema.js';
 import {
     bookingTimes,
     remainingCapacity,
     cancellationRefund,
+    bookingPayable,
 } from '../src/utils/booking.js';
+import { PLAN_DEFINITIONS } from '../src/config/plans.js';
 
 const start = new Date(Date.now() + 86400000);
 const end = new Date(+start + 3600000);
@@ -79,12 +84,48 @@ const success = {
     amount: 2050,
     currency: 'NGN',
 };
-function mockDb(t, override = () => undefined) {
+function mockDb(t, override = () => undefined, subscriptionPlan = null) {
     const calls = [];
     const query = async (sql, values = []) => {
         calls.push({ sql, values });
         const result = await override(sql, values);
         if (result !== undefined) return result;
+        if (sql.includes('FROM subscriptions s')) {
+            if (!subscriptionPlan) return { rows: [] };
+            const plan = PLAN_DEFINITIONS[subscriptionPlan];
+            return {
+                rows: [{
+                    plan: subscriptionPlan,
+                    status: 'ACTIVE',
+                    planVersion: 1,
+                    currentPeriodEnd: new Date(Date.now() + 86400000),
+                    graceEndsAt: null,
+                    versionPlan: subscriptionPlan,
+                    priceNaira: plan.priceNaira,
+                    commissionPercent: plan.commissionPercent,
+                    activeServices: plan.activeServices,
+                    packagesPerService: plan.packagesPerService,
+                    portfolioImages: plan.portfolioImages,
+                    promotedSlotsPerMonth: plan.promotedSlotsPerMonth,
+                    analytics: plan.analytics,
+                    support: plan.support,
+                }],
+            };
+        }
+        if (sql.includes('FROM plan_versions'))
+            return {
+                rows: Object.values(PLAN_DEFINITIONS).map((plan) => ({
+                    plan: plan.code,
+                    priceNaira: plan.priceNaira,
+                    commissionPercent: plan.commissionPercent,
+                    activeServices: plan.activeServices,
+                    packagesPerService: plan.packagesPerService,
+                    portfolioImages: plan.portfolioImages,
+                    promotedSlotsPerMonth: plan.promotedSlotsPerMonth,
+                    analytics: plan.analytics,
+                    support: plan.support,
+                })),
+            };
         if (sql.startsWith('SELECT s.*')) return { rows: [{ ...service }] };
         if (
             sql.startsWith('SELECT scheduled_for') ||
@@ -137,6 +178,25 @@ test('booking input rejects product/order fields, owner overrides, precision los
     ])
         assert.ok(createBookingSchema.validate({ ...input, ...extra }).error);
     assert.ok(bookingListSchema.validate({ vendor_id: 9 }).error);
+    assert.equal(
+        bookingDecisionSchema.validate({
+            decision: 'decline',
+            reason: 'Unavailable',
+        }).error,
+        undefined
+    );
+    assert.ok(
+        bookingDecisionSchema.validate({ decision: 'decline' }).error
+    );
+    assert.ok(
+        bookingRescheduleProposalSchema.validate({
+            scheduled_for: '2027-01-01T12:00:00',
+        }).error
+    );
+    assert.equal(
+        bookingRescheduleResponseSchema.validate({ accept: true }).error,
+        undefined
+    );
 });
 test('availability uses peak overlap and buffers, with end-before-start boundary handling', () => {
     const a = new Date('2027-01-01T12:00:00Z');
@@ -167,7 +227,14 @@ test('creation reserves only a service and snapshots price and duration under it
     );
     assert.equal(insert.values[0], 1);
     assert.equal(insert.values[5], '20.50');
-    assert.equal(+insert.values[7] - +insert.values[6], 3600000);
+    assert.equal(+insert.values[10] - +insert.values[9], 3600000);
+    assert.ok(
+        new Date(insert.values[17]).getTime() - Date.now() > 23 * 60 * 60000
+    );
+    assert.equal(String(insert.values[6]), '15');
+    assert.equal(insert.values[7], '3.08');
+    assert.equal(insert.values[8], '17.42');
+    assert.ok(insert.sql.includes('commission_rate,commission_amount,vendor_amount'));
     assert.ok(
         calls.findIndex((x) => x.sql.includes('FOR UPDATE OF s')) <
             calls.findIndex((x) => x.sql.startsWith('SELECT scheduled_for'))
@@ -175,6 +242,16 @@ test('creation reserves only a service and snapshots price and duration under it
     assert.ok(
         !calls.some((x) => /INSERT INTO (orders|order_items)/.test(x.sql))
     );
+});
+test('booking snapshots the provider commission from the active plan', async (t) => {
+    const calls = mockDb(t, undefined, 'PRO');
+    await Booking.create(1, input);
+    const insert = calls.find((x) =>
+        x.sql.startsWith('INSERT INTO service_bookings')
+    );
+    assert.equal(insert.values[6], 10);
+    assert.equal(insert.values[7], '2.05');
+    assert.equal(insert.values[8], '18.45');
 });
 for (const scenario of ['capacity', 'price', 'location', 'inactive'])
     test(`creation rejects ${scenario} and rolls back`, async (t) => {
@@ -216,7 +293,7 @@ test('idempotency retry returns the original booking; changed payload is rejecte
         if (sql.includes('checkout_key ='))
             return { rows: saved ? [saved] : [] };
         if (sql.startsWith('INSERT INTO service_bookings')) {
-            saved = { ...booking, checkout_hash: values[16] };
+            saved = { ...booking, checkout_hash: values[19] };
             return { rows: [saved] };
         }
     });
@@ -268,8 +345,129 @@ test('vendor cannot start an unpaid or future booking and customer cannot advanc
         /transition/
     );
 });
-test('booking settlement confirms atomically without mutating orders', async (t) => {
+test('vendor must accept a request before customer payment is allowed', async (t) => {
     const calls = mockDb(t);
+    assert.equal(bookingPayable(booking), false);
+    const accepted = {
+        ...booking,
+        booking_status: 'accepted',
+        reservation_expires_at: new Date(Date.now() + 60000),
+    };
+    assert.equal(bookingPayable(accepted), true);
+    await Booking.decide(9, 2, { decision: 'accept' });
+    const update = calls.find((x) =>
+        x.sql.startsWith('UPDATE service_bookings')
+    );
+    assert.equal(update.values[0], 'accepted');
+    assert.ok(new Date(update.values[2]).getTime() - Date.now() <= 15 * 60000);
+});
+test('vendor can decline only an unpaid pending request and buyer receives reason', async (t) => {
+    const calls = mockDb(t);
+    await Booking.decide(9, 2, {
+        decision: 'decline',
+        reason: 'I am unavailable at that time',
+    });
+    const update = calls.find((x) =>
+        x.sql.startsWith('UPDATE service_bookings')
+    );
+    assert.equal(update.values[0], 'declined');
+    assert.equal(update.values[1], 'I am unavailable at that time');
+    assert.equal(update.values[2], null);
+    const paidCalls = mockDb(t, (sql) =>
+        sql.startsWith('SELECT * FROM service_bookings')
+            ? {
+                  rows: [
+                      {
+                          ...booking,
+                          booking_status: 'confirmed',
+                          payment_status: 'paid',
+                      },
+                  ],
+              }
+            : undefined
+    );
+    await assert.rejects(
+        Booking.decide(9, 2, { decision: 'decline', reason: 'No longer free' }),
+        /awaiting a vendor decision/
+    );
+    assert.ok(
+        !paidCalls.some((x) => x.sql.startsWith('UPDATE service_bookings'))
+    );
+});
+test('vendor reschedule proposal stays pending until buyer approval', async (t) => {
+    const proposed = new Date(Date.now() + 3 * 86400000).toISOString();
+    const calls = mockDb(t, (sql) => {
+        if (sql.startsWith('SELECT service_id FROM service_bookings'))
+            return { rows: [{ service_id: 3 }] };
+        if (sql.startsWith('SELECT max_bookings_per_slot'))
+            return { rows: [{ max_bookings_per_slot: 1 }] };
+        if (sql.startsWith('SELECT * FROM service_bookings'))
+            return {
+                rows: [
+                    {
+                        ...booking,
+                        booking_status: 'confirmed',
+                        payment_status: 'paid',
+                    },
+                ],
+            };
+    });
+    await Booking.proposeReschedule(9, 2, proposed);
+    const update = calls.find((x) =>
+        x.sql.startsWith('UPDATE service_bookings')
+    );
+    assert.match(update.sql, /proposed_scheduled_for = \$1/);
+    assert.equal(new Date(update.values[0]).toISOString(), proposed);
+    assert.equal(update.values[2], 9);
+});
+test('buyer response to reschedule is scoped to buyer and applies only approved time', async (t) => {
+    const proposedStart = new Date(Date.now() + 3 * 86400000);
+    const proposedEnd = new Date(+proposedStart + 3600000);
+    const calls = mockDb(t, (sql) => {
+        if (sql.startsWith('SELECT service_id FROM service_bookings'))
+            return { rows: [{ service_id: 3 }] };
+        if (sql.startsWith('SELECT max_bookings_per_slot'))
+            return { rows: [{ max_bookings_per_slot: 1 }] };
+        if (sql.startsWith('SELECT * FROM service_bookings'))
+            return {
+                rows: [
+                    {
+                        ...booking,
+                        booking_status: 'confirmed',
+                        payment_status: 'paid',
+                        proposed_scheduled_for: proposedStart,
+                        proposed_ends_at: proposedEnd,
+                    },
+                ],
+            };
+    });
+    await Booking.respondToReschedule(9, 1, true);
+    const update = calls.find((x) =>
+        x.sql.startsWith('UPDATE service_bookings')
+    );
+    assert.equal(+update.values[0], +proposedStart);
+    assert.equal(+update.values[1], +proposedEnd);
+    assert.match(update.sql, /proposed_scheduled_for = NULL/);
+    assert.deepEqual(
+        calls.find((x) => x.sql.startsWith('SELECT * FROM service_bookings'))
+            .values,
+        [9, 1]
+    );
+});
+test('booking settlement confirms atomically without mutating orders', async (t) => {
+    const calls = mockDb(t, (sql) =>
+        sql.startsWith('SELECT * FROM service_bookings')
+            ? {
+                  rows: [
+                      {
+                          ...booking,
+                          booking_status: 'accepted',
+                          reservation_expires_at: new Date(Date.now() + 60000),
+                      },
+                  ],
+              }
+            : undefined
+    );
     const result = await Payment.settle('paystack', success, 'event-1');
     assert.equal(result.status, 'confirmed');
     assert.equal(result.booking_id, 9);
@@ -356,6 +554,15 @@ test('saved payment initialization is reused without another gateway call', asyn
     mockDb(t, (sql) =>
         sql.startsWith('SELECT * FROM payments')
             ? { rows: [{ ...payment, checkout_data: JSON.stringify(saved) }] }
+            : sql.startsWith('SELECT b.*')
+              ? {
+                    rows: [
+                        {
+                            ...booking,
+                            booking_status: 'accepted',
+                        },
+                    ],
+                }
             : undefined
     );
     assert.deepEqual(await BookingPayment.initiate(1, 9), saved);

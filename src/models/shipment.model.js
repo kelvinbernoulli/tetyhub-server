@@ -2,6 +2,11 @@ import pool from '#services/pg_pool.js';
 import Notification from '#models/notification.model.js';
 import { CheckoutError, transaction } from '#utils/checkout.js';
 import { fulfillmentStatus, validateShipmentTransition } from '#services/shipment.js';
+import {
+    advanceFulfillmentStatus,
+    aggregateFulfillmentStatus,
+    shipmentFulfillmentStatus,
+} from '#services/order-fulfillment.js';
 
 const editableFields = ['tracking_number', 'carrier', 'shipping_method', 'estimated_delivery', 'shipping_cost', 'status', 'notes'];
 const publicFields = ['tracking_number', 'carrier', 'shipping_method', 'estimated_delivery', 'status'];
@@ -10,7 +15,39 @@ async function syncOrder(client, order, changedBy) {
     if (['cancelled', 'returned', 'refunded', 'payment_review'].includes(order.status)) return;
     const { rows: shipments } = await client.query('SELECT vendor_id, status FROM shipments WHERE order_id = $1', [order.id]);
     const { rows } = await client.query('SELECT COUNT(DISTINCT vendor_id)::int AS count FROM order_items WHERE order_id = $1 AND product_id IS NOT NULL', [order.id]);
-    const status = fulfillmentStatus(shipments, rows[0].count);
+    const { rows: groups } = await client.query(
+        'SELECT vendor_id, status FROM vendor_order_fulfillments WHERE order_id = $1 FOR UPDATE',
+        [order.id]
+    );
+    if (groups.length) {
+        for (const group of groups) {
+            const shipment = shipments.find((item) => item.vendor_id === group.vendor_id);
+            if (!shipment) continue;
+            const nextStatus = advanceFulfillmentStatus(
+                group.status,
+                shipmentFulfillmentStatus(shipment.status)
+            );
+            if (nextStatus !== group.status) {
+                await client.query(
+                    `UPDATE vendor_order_fulfillments SET status = $1, updated_at = NOW()
+                     WHERE order_id = $2 AND vendor_id = $3`,
+                    [nextStatus, order.id, group.vendor_id]
+                );
+                await client.query(
+                    `INSERT INTO vendor_order_fulfillment_history
+                     (fulfillment_id, status, note, changed_by)
+                     SELECT id, $1, 'Shipment progress updated', $2
+                     FROM vendor_order_fulfillments
+                     WHERE order_id = $3 AND vendor_id = $4`,
+                    [nextStatus, changedBy, order.id, group.vendor_id]
+                );
+                group.status = nextStatus;
+            }
+        }
+    }
+    const status = groups.length
+        ? aggregateFulfillmentStatus(groups.map((group) => group.status), order.status)
+        : fulfillmentStatus(shipments, rows[0].count);
     // Packing is a manual step; creating a pending shipment should not undo it.
     if (!status || status === order.status || (status === 'awaiting_shipment' && order.status === 'packed')) return;
     await client.query('UPDATE orders SET status = $1, updated_at = NOW() WHERE id = $2', [status, order.id]);

@@ -12,17 +12,18 @@ const scheduled = Joi.string()
     .required();
 export const createBookingSchema = Joi.object({
     service_id: bookingIdSchema,
+    idempotency_key: Joi.string().guid({ version: 'uuidv4' }).required(),
     scheduled_for: scheduled,
     gateway: Joi.string().valid('paystack').required(),
     expected_currency: Joi.string()
         .valid('NGN')
         .required(),
     expected_total: Joi.number()
+        .strict()
         .positive()
         .max(99999999.99)
         .precision(2)
         .required(),
-    // idempotency_key: Joi.string().guid({ version: 'uuidv4' }).required(),
     location: Joi.string().trim().max(1000),
     note: Joi.string().trim().max(1000),
 })
@@ -34,9 +35,11 @@ export const availabilitySchema = Joi.object({
 export const bookingListSchema = Joi.object({
     status: Joi.string().valid(
         'pending',
+        'accepted',
         'confirmed',
         'active',
         'completed',
+        'declined',
         'cancelled',
         'expired',
         'payment_review'
@@ -50,3 +53,23 @@ export const cancelBookingSchema = Joi.object({
 export const bookingStatusSchema = Joi.object({
     status: Joi.string().valid('active', 'completed').required(),
 }).required();
+export const bookingDecisionSchema = Joi.object({
+    decision: Joi.string().valid('accept', 'decline').required(),
+    reason: Joi.alternatives().conditional('decision', {
+        is: 'decline',
+        then: Joi.string().trim().min(1).max(1000).required(),
+        otherwise: Joi.forbidden(),
+    }),
+})
+    .required()
+    .options({ allowUnknown: false, stripUnknown: false });
+export const bookingRescheduleProposalSchema = Joi.object({
+    scheduled_for: scheduled,
+})
+    .required()
+    .options({ allowUnknown: false, stripUnknown: false });
+export const bookingRescheduleResponseSchema = Joi.object({
+    accept: Joi.boolean().required(),
+})
+    .required()
+    .options({ allowUnknown: false, stripUnknown: false });

@@ -188,6 +188,7 @@ router.post('/service/book', authenticated, isCustomer, requireCsrfProtection, c
 router.get('/bookings', authenticated, isCustomer, BookingController.list);
 router.get('/bookings/:bookingId', authenticated, isCustomer, BookingController.view);
 router.patch('/bookings/:bookingId/cancel', authenticated, isCustomer, requireCsrfProtection, BookingController.cancel);
+router.patch('/bookings/:bookingId/reschedule', authenticated, isCustomer, requireCsrfProtection, BookingController.respondToReschedule);
 router.post('/bookings/:bookingId/payment', authenticated, isCustomer, requireCsrfProtection, paymentLimit, BookingController.pay);
 
 //orders
@@ -217,6 +218,13 @@ router.get(
     authenticated,
     isCustomer,
     OrderController.getOrderHistory
+);
+router.post(
+    '/orders/:orderId/vendors/:vendorId/confirm-delivery',
+    authenticated,
+    isCustomer,
+    requireCsrfProtection,
+    OrderController.confirmVendorDelivery
 );
 router.patch(
     '/orders/cancel/:orderId',

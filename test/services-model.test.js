@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import Services from '../src/models/services.model.js';
 import pool from '../src/services/pg_pool.js';
 import * as controllers from '../src/controllers/services.controller.js';
+import { PLAN_DEFINITIONS } from '../src/config/plans.js';
 const existing = {
     id: 7,
     vendor_id: 3,
@@ -19,6 +20,29 @@ function database(t, handler = () => undefined) {
         calls.push({ sql, values });
         const result = handler(sql, values);
         if (result !== undefined) return result;
+        if (sql.startsWith('SELECT pg_advisory_xact_lock'))
+            return { rows: [{}] };
+        if (sql.includes('FROM subscriptions s'))
+            return { rows: [] };
+        if (sql.includes('FROM plan_versions')) {
+            return {
+                rows: Object.values(PLAN_DEFINITIONS).map((plan) => ({
+                    plan: plan.code,
+                    priceNaira: plan.priceNaira,
+                    commissionPercent: plan.commissionPercent,
+                    activeServices: plan.activeServices,
+                    packagesPerService: plan.packagesPerService,
+                    portfolioImages: plan.portfolioImages,
+                    promotedSlotsPerMonth: plan.promotedSlotsPerMonth,
+                    analytics: plan.analytics,
+                    support: plan.support,
+                })),
+            };
+        }
+        if (sql.includes('cardinality(images)'))
+            return { rows: [{ count: 0 }] };
+        if (sql.includes("status = 'active' AND deleted_at IS NULL"))
+            return { rows: [{ count: 0 }] };
         if (sql.startsWith('SELECT id FROM')) return { rows: [{ id: 1 }] };
         if (sql.startsWith('SELECT COUNT')) return { rows: [{ total: 1 }] };
         return { rows: [existing] };
@@ -61,7 +85,7 @@ test('service detail, update and delete all require and bind vendor scope', asyn
 test('partial update checks stored prices under a row lock and rolls back', async (t) => {
     const calls = database(t);
     await assert.rejects(Services.update(7, 3, { base_price: 30 }), /higher/);
-    assert.match(calls[1].sql, /FOR UPDATE/);
+    assert.ok(calls.some((call) => /FOR UPDATE/.test(call.sql)));
     assert.equal(calls.at(-1).sql, 'ROLLBACK');
     assert.ok(!calls.some((call) => call.sql.startsWith('UPDATE')));
 });
@@ -176,6 +200,108 @@ test('create uploads thumbnail and gallery and persists URLs', async (t) => {
             )
         );
     assert.deepEqual(media.deleted, []);
+});
+
+test('service creation enforces active-service limits before uploading', async (t) => {
+    database(t, (sql) =>
+        sql.includes("status = 'active' AND deleted_at IS NULL")
+            ? { rows: [{ count: 3 }] }
+            : undefined
+    );
+    let uploads = 0;
+    t.mock.method(Services.storage, 'upload', async () => {
+        uploads += 1;
+        return { url: 'https://storage.example/image.png' };
+    });
+
+    await assert.rejects(
+        Services.create(3, {
+            name: 'Consultation',
+            category_id: 1,
+            currency_id: 1,
+            base_price: 10,
+            thumbnail: image,
+        }),
+        {
+            code: 'PLAN_LIMIT_REACHED',
+            status: 403,
+            limitName: 'activeServices',
+            limit: 3,
+            currentCount: 3,
+            planNeeded: 'PRO',
+        }
+    );
+    assert.equal(uploads, 0);
+});
+
+test('service creation enforces the provider portfolio image limit before upload', async (t) => {
+    database(t, (sql) =>
+        sql.includes('cardinality(images)')
+            ? { rows: [{ count: 5 }] }
+            : undefined
+    );
+    let uploads = 0;
+    t.mock.method(Services.storage, 'upload', async () => {
+        uploads += 1;
+        return { url: 'https://storage.example/image.png' };
+    });
+
+    await assert.rejects(
+        Services.create(3, {
+            name: 'Consultation',
+            category_id: 1,
+            currency_id: 1,
+            base_price: 10,
+            thumbnail: image,
+            images: [image],
+        }),
+        {
+            code: 'PLAN_LIMIT_REACHED',
+            status: 403,
+            limitName: 'portfolioImages',
+            limit: 5,
+            currentCount: 5,
+            planNeeded: 'PRO',
+        }
+    );
+    assert.equal(uploads, 0);
+});
+
+test('service controller returns structured plan limit details', async (t) => {
+    t.mock.method(Services, 'create', async () => {
+        throw Object.assign(
+            new Error('Your FREE plan allows 3 activeServices'),
+            {
+                status: 403,
+                code: 'PLAN_LIMIT_REACHED',
+                limitName: 'activeServices',
+                limit: 3,
+                currentCount: 3,
+                requestedCount: 1,
+                planNeeded: 'PRO',
+            }
+        );
+    });
+    const response = res();
+    await controllers.createService(
+        {
+            auth: { vendorId: 3 },
+            body: {
+                name: 'Consultation',
+                description: 'A consultation session',
+                category_id: 1,
+                currency_id: 1,
+                base_price: 10,
+                thumbnail: image,
+            },
+        },
+        response
+    );
+    assert.equal(response.code, 403);
+    assert.equal(response.body.code, 'PLAN_LIMIT_REACHED');
+    assert.equal(response.body.limit, 3);
+    assert.equal(response.body.currentCount, 3);
+    assert.equal(response.body.planNeeded, 'PRO');
 });
 test('update uploads supplied media and clearing media does not upload', async (t) => {
     const calls = database(t);

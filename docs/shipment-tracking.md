@@ -1,6 +1,6 @@
 # Manual shipment tracking
 
-Each vendor creates one shipment per order, covering all of that vendor's product items. Split parcels within one vendor are not supported yet. Customer responses include the shipment's items, carrier, tracking number, estimated/actual delivery, status, and chronological tracking history. Vendor notes are excluded from customer reads.
+Each vendor creates one shipment per order, covering all of that vendor's product items. Split parcels within one vendor are not supported yet. A parent checkout has a separate fulfillment status for every vendor; shipment progress advances only that vendor's fulfillment, while the parent order reflects aggregate progress. Customer responses include the shipment's items, carrier, tracking number, estimated/actual delivery, status, and chronological tracking history. Vendor notes are excluded from customer reads.
 
 ## Vendor API
 
@@ -38,10 +38,12 @@ The frontend can poll the plural endpoint while the tracking screen is open. No 
 
 ## Consistency and notifications
 
-Both write endpoints run shipment changes, tracking events, overall order progress, order history, and customer in-app notifications in one transaction. Order locks serialize updates from different vendors. Missing vendor shipments prevent completion. The order becomes shipped once every vendor shipment is at least shipped, out for delivery once all are at least out for delivery, and delivered only when all are delivered. In transit does not mean out for delivery. Delivery problems remain visible on the individual shipment and prevent aggregate completion. Returns/refunds retain their separate order workflow.
+Both write endpoints run shipment changes, tracking events, vendor fulfillment progress, overall order progress, order history, and customer in-app notifications in one transaction. Order locks serialize updates from different vendors. A vendor's shipment status cannot advance another vendor's fulfillment. The parent order uses the least-advanced active vendor status and becomes delivered only when all vendor fulfillments are delivered. In transit maps to shipped, not out for delivery. Delivery problems remain visible on the individual shipment and do not advance that vendor's fulfillment. Returns/refunds retain their separate order workflow.
 
 ## Database rollout
 
 Apply `20260925120000_vendor_shipment_tracking` through the project's migration workflow before running this code. It removes the old one-shipment-per-order unique index, adds vendor ownership and uniqueness per order/vendor, and indexes the event timeline. Existing single-vendor shipments are assigned automatically. Ambiguous legacy shipments retain a null vendor: customers can still read them, but vendor mutations and new shipment creation for that order are blocked until an operator reconciles their ownership. No historical events are fabricated.
+
+Apply `20261011090000_vendor_order_fulfillments` after the shipment migration. It creates and backfills one fulfillment record per vendor represented in each product order.
 
 Run `node --test test/shipment.test.js test/order-history.test.js`. Optional PostgreSQL coverage uses `SHIPMENT_DATABASE_URL` and an isolated temporary schema; it does not use the application database URL.

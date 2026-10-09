@@ -26,6 +26,37 @@ No migration is applied automatically by the application.
 6. `/orders/place` is now an alias of checkout and requires the same flat request body.
    Order history is `/orders/:orderId/history`. Cancellation is restricted to unpaid pending orders.
 
+One checkout and parent order may include products from multiple vendors. The customer pays once;
+checkout creates one vendor fulfillment record per vendor, and each vendor sees and updates only
+their own items and fulfillment status. The customer order response includes `vendor_fulfillments`
+with each vendor ID, current status, and that vendor's items. Vendor order responses include
+`vendor_fulfillment_status`; vendor status filters apply to that status. The parent `status` remains
+an aggregate and reflects the least-advanced active vendor fulfillment. Each vendor fulfillment
+includes a chronological `status_history`; the vendor's order response exposes its own
+`vendor_fulfillment_history`. Shipment tracking advances and records history only for the matching
+vendor fulfillment. A return request from one vendor does not mark the entire mixed-vendor order as
+returned. This is fulfillment separation, not escrow or split payouts; vendor settlements and
+payment release remain unchanged.
+
+Platform administrators can read commission settings at `GET /v1/api/admin/commission-rates`, update both
+rates through `PATCH /v1/api/admin/commission-rates` (`product_rate` and `service_rate`, percentages with
+up to two decimal places), and review changes at `GET /v1/api/admin/commission-rates/history`. Updating
+rates requires recent authentication and the `settings` update permission. Both rates default to
+`0.00%` until configured. Every new product fulfillment and service booking snapshots its applicable
+rate and calculated commission; later rate changes do not alter existing sales. Commission is
+calculated on the discounted item/service amount, excluding shipping and tax.
+
+After a vendor shipment is marked delivered, the customer confirms that vendor's delivery with
+`POST /orders/:orderId/vendors/:vendorId/confirm-delivery`. This marks that vendor's product
+allocation eligible for payout; an in-progress return blocks confirmation. Delivery confirmations
+and sale/commission accounting are recorded in the marketplace ledger. The weekly Paystack transfer
+batch is not automated yet; vendor bank-recipient onboarding and transfer reconciliation must be
+implemented before eligible balances can be paid out.
+
+Service commission snapshots are recorded at booking creation. Service escrow is not yet wired to
+Payscrow: its merchant API contract and webhook/signature details must be integrated before service
+payments can be represented as escrowed or released.
+
 Checkout creation is limited to 10 requests/minute per authenticated user per server instance; payment endpoints allow 30. Use an edge/distributed limiter when scaling horizontally.
 
 Prices are read afresh at checkout. A changed total returns 409 before creating an order.
@@ -65,6 +96,8 @@ event insertion and order/payment updates commit together.
   explicit reconciliation. Legacy stock reservations are not guessed or restored by the worker.
 - Existing installations with manual tables/schema changes must compare them with the migration first;
   the migration follows the checked-in history and creates the previously missing event/history/usage tables.
+- Apply `20261011090000_vendor_order_fulfillments` to backfill vendor fulfillment records for existing
+  product orders before deploying the updated API.
 
 ## Validation
 
