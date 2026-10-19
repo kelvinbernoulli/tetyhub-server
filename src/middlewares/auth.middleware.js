@@ -10,7 +10,7 @@ import {
 } from '#utils/access-control.js';
 import { respondWithError } from '#utils/response.js';
 import { csrfTokensMatch } from '#utils/csrf.js';
-import { RECENT_AUTHENTICATION_MAX_AGE_MS } from '#services/session.service.js';
+import { RECENT_AUTHENTICATION_MAX_AGE_MS, revokeUserSessions } from '#services/session.service.js';
 
 class AuthenticationError extends Error {
     constructor(message, status = 401, code = ERROR_CODES.UNAUTHORIZED) {
@@ -64,6 +64,16 @@ export const hydrateAuthContext = async (req) => {
         throw new AuthenticationError('Session is no longer valid.');
     }
 
+    const sessionAuthVersion = Number(req.session?.user?.auth_version);
+    const currentAuthVersion = Number(principal.auth_version);
+    if (
+        !Number.isSafeInteger(sessionAuthVersion) ||
+        !Number.isSafeInteger(currentAuthVersion) ||
+        sessionAuthVersion !== currentAuthVersion
+    ) {
+        await revokeUserSessions(sessionUserId);
+        throw new AuthenticationError('Session is no longer valid. Please log in again.');
+    }
     if (principal.user_status !== USER_STATUSES.ACTIVE) {
         throw new AuthenticationError(
             'This account is not active.',

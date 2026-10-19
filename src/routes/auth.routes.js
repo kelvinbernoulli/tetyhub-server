@@ -3,6 +3,7 @@ import * as AdminController from "#controllers/admin.controller.js";
 import { authenticated, isSuperAdmin, requireCsrfProtection, requireRecentAuthentication } from "#middlewares/auth.middleware.js";
 import { Router } from "express";
 import { rateLimit } from "express-rate-limit";
+import { createAuthRateLimiter } from '#middlewares/auth-rate-limit.middleware.js';
 const router = Router();
 
 const invitationLimiter = rateLimit({
@@ -31,11 +32,26 @@ const reauthenticationLimiter = rateLimit({
         code: 3000,
     },
 });
+const signInLimiter = createAuthRateLimiter({
+    scope: 'signin',
+    maxIp: 30,
+    maxAccount: 10,
+});
+const emailActionLimiter = createAuthRateLimiter({
+    scope: 'email-action',
+    maxIp: 20,
+    maxAccount: 5,
+});
+const resetConfirmLimiter = createAuthRateLimiter({
+    scope: 'password-reset-confirm',
+    maxIp: 30,
+    maxAccount: 10,
+});
 
-router.post("/signup", AuthController.userSignup);
-router.get("/verify-email", AuthController.verifyEmail);
-router.post('/resend-verification', AuthController.resendVerification);
-router.post("/signin", AuthController.userSignin);
+router.post("/signup", emailActionLimiter, AuthController.userSignup);
+router.get("/verify-email", emailActionLimiter, AuthController.verifyEmail);
+router.post('/resend-verification', emailActionLimiter, AuthController.resendVerification);
+router.post("/signin", signInLimiter, AuthController.userSignin);
 router.post("/reauthenticate", authenticated, requireCsrfProtection, reauthenticationLimiter, AuthController.reauthenticate);
 router.post("/refresh-session", authenticated, AuthController.refreshSession);
 router.get("/csrf-token", authenticated, AuthController.getCsrfToken);
@@ -45,8 +61,8 @@ router.delete("/sessions/:sessionId", authenticated, isSuperAdmin, requireRecent
 router.delete("/user/sessions/:sessionId", authenticated, requireCsrfProtection, AuthController.revokeUserSession);
 router.post("/signout", authenticated, AuthController.signOut);
 
-router.post("/password-reset/request", AuthController.requestPasswordReset);
-router.post("/password-reset/confirm", AuthController.confirmPasswordReset);
+router.post("/password-reset/request", emailActionLimiter, AuthController.requestPasswordReset);
+router.post("/password-reset/confirm", resetConfirmLimiter, AuthController.confirmPasswordReset);
 router.post("/admin-invitations/accept", invitationLimiter, AdminController.acceptAdminInvitation);
 router.get('/google', AuthController.googleAuth);
 router.get('/google/callback', AuthController.googleAuthCallback);

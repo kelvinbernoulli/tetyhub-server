@@ -15,8 +15,7 @@ export const transporter = nodemailer.createTransport({
         pass: process.env.MAILER_PASSWORD,
     },
     tls: {
-        ciphers: 'TLSv1.2',
-        rejectUnauthorized: false,
+        rejectUnauthorized: true,
     },
     requireTLS: true,
     logger: false,

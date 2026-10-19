@@ -79,52 +79,53 @@ enum PlanSupport {
 // ===============================================
 
 model users {
-  coupon_usage             coupon_usage[]
-  commission_settings_updated platform_commission_settings[] @relation("CommissionSettingsUpdater")
-  commission_changes        platform_commission_settings_history[] @relation("CommissionHistoryActor")
-  changed_order_statuses   order_status_history[]
-  id                       Int                    @id @default(autoincrement())
-  firstname                String?
-  lastname                 String?
-  email                    String                 @unique
-  password                 String
-  phone                    String?                @unique
-  country_id               Int?
-  role                     UserRole               @default(CUSTOMER)
-  google_id                String?                @unique
-  status                   UserStatus             @default(ACTIVE)
-  email_verified           Boolean                @default(false)
-  email_verification_token String?
-  email_verified_at        DateTime?
-  legacy_admin_roles       String[]               @default([]) @map("admin_role")
-  auth_version             Int                    @default(1)
-  created_at               DateTime               @default(now())
-  updated_at               DateTime?              @updatedAt
+  coupon_usage                coupon_usage[]
+  commission_settings_updated platform_commission_settings[]         @relation("CommissionSettingsUpdater")
+  commission_changes          platform_commission_settings_history[] @relation("CommissionHistoryActor")
+  changed_order_statuses      order_status_history[]
+  id                          Int                                    @id @default(autoincrement())
+  firstname                   String?
+  lastname                    String?
+  email                       String                                 @unique
+  password                    String
+  phone                       String?                                @unique
+  country_id                  Int?
+  role                        UserRole                               @default(CUSTOMER)
+  google_id                   String?                                @unique
+  status                      UserStatus                             @default(ACTIVE)
+  email_verified              Boolean                                @default(false)
+  email_verification_token    String?
+  email_verified_at           DateTime?
+  legacy_admin_roles          String[]                               @default([]) @map("admin_role")
+  auth_version                Int                                    @default(1)
+  created_at                  DateTime                               @default(now())
+  updated_at                  DateTime?                              @updatedAt
 
   // Relations
-  country                   countries?               @relation(fields: [country_id], references: [id])
-  user_info                 users_info?
-  vendors                   vendors?
-  orders                    orders[]
-  payments                  payments[]
-  carts                     carts[]
-  wishlists                 wishlist_items[]
-  reviews                   reviews[]
-  returns                   returns[]
-  notifications             notifications[]
-  activity_logs             activity_logs[]
-  support_tickets           support_tickets[]
-  support_ticket_replies    support_ticket_replies[]
-  assigned_support_tickets  support_tickets[]        @relation("SupportAssignee")
-  pending_support_transfers support_tickets[]        @relation("SupportTransferTarget")
-  requested_support_transfers support_tickets[]      @relation("SupportTransferRequester")
-  shipping_addresses        shipping_addresses[]
-  admin                     admins?                  @relation("AdminUser")
-  admin_assignments_created admins[]                 @relation("AdminCreatedBy")
-  permission_grants_created admin_permissions[]      @relation("PermissionGrantedBy")
-  admin_audit_logs          admin_audit_logs[]       @relation("AdminAuditActor")
-  service_bookings          service_bookings[]
-  vendorSettings            vendor_settings?
+  country                     countries?               @relation(fields: [country_id], references: [id])
+  user_info                   users_info?
+  vendors                     vendors?
+  orders                      orders[]
+  payments                    payments[]
+  carts                       carts[]
+  wishlists                   wishlist_items[]
+  reviews                     reviews[]
+  returns                     returns[]
+  notifications               notifications[]
+  activity_logs               activity_logs[]
+  support_tickets             support_tickets[]
+  support_ticket_replies      support_ticket_replies[]
+  assigned_support_tickets    support_tickets[]        @relation("SupportAssignee")
+  pending_support_transfers   support_tickets[]        @relation("SupportTransferTarget")
+  requested_support_transfers support_tickets[]        @relation("SupportTransferRequester")
+  shipping_addresses          shipping_addresses[]
+  admin                       admins?                  @relation("AdminUser")
+  admin_assignments_created   admins[]                 @relation("AdminCreatedBy")
+  permission_grants_created   admin_permissions[]      @relation("PermissionGrantedBy")
+  admin_audit_logs            admin_audit_logs[]       @relation("AdminAuditActor")
+  service_bookings            service_bookings[]
+  vendorSettings              vendor_settings?
+  serviceBookmarks            service_bookmarks[]
 
   @@index([country_id])
 }
@@ -153,17 +154,17 @@ model users_info {
 // ===============================================
 
 model vendors {
-  shipments shipments[]
-  order_fulfillments vendor_order_fulfillments[]
-  marketplace_ledger_entries marketplace_ledger_entries[]
-  subscription         Subscription?
-  subscription_events  SubscriptionEvent[]
-  id                  Int       @id @default(autoincrement())
-  user_id             Int       @unique
-  verification_status String    @default("pending") // pending, verified, rejected
-  status              String    @default("active") // active, inactive, suspended
-  created_at          DateTime  @default(now())
-  updated_at          DateTime? @updatedAt
+  shipments           shipments[]
+  order_fulfillments  vendor_order_fulfillments[]
+  ledger_entries      ledger_entries[]
+  subscription        Subscription?
+  subscription_events SubscriptionEvent[]
+  id                  Int                         @id @default(autoincrement())
+  user_id             Int                         @unique
+  verification_status String                      @default("pending") // pending, verified, rejected
+  status              String                      @default("active") // active, inactive, suspended
+  created_at          DateTime                    @default(now())
+  updated_at          DateTime?                   @updatedAt
 
   users            users              @relation(fields: [user_id], references: [id], onDelete: Cascade)
   products         products[]
@@ -178,6 +179,8 @@ model vendors {
   admin_audit_logs admin_audit_logs[]
   services         services[]
   service_bookings service_bookings[]
+  promotions       promotions[]
+  payouts          vendor_payouts[]
   vendorSettings   vendor_settings?
 }
 
@@ -529,6 +532,20 @@ model wishlist_items {
   @@map("wishlist_items")
 }
 
+model service_bookmarks {
+  id         Int      @id @default(autoincrement())
+  user_id    Int
+  service_id Int
+  created_at DateTime @default(now())
+
+  // Relations
+  user    users    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  service services @relation(fields: [service_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, service_id])
+  @@index([user_id, created_at])
+}
+
 // ===============================================
 // ORDERS & PAYMENTS
 // ===============================================
@@ -559,16 +576,17 @@ model orders {
   updated_at             DateTime? @updatedAt
 
   // Relations
-  user                  users                   @relation(fields: [user_id], references: [id])
-  coupon                coupons?                @relation(fields: [coupon_id], references: [id])
+  user                  users                       @relation(fields: [user_id], references: [id])
+  coupon                coupons?                    @relation(fields: [coupon_id], references: [id])
   items                 order_items[]
   vendor_fulfillments   vendor_order_fulfillments[]
-  marketplace_ledger_entries marketplace_ledger_entries[]
+  ledger_entries        ledger_entries[]
+  payouts               vendor_payouts[]
   payments              payments[]
   shipments             shipments[]
   returns               returns[]
   shipping_addresses    shipping_addresses[]
-  currency              currencies?             @relation(fields: [currency_id], references: [id])
+  currency              currencies?                 @relation(fields: [currency_id], references: [id])
   coupon_usage          coupon_usage?
   status_history        order_status_history[]
   checkout_notification checkout_notifications?
@@ -580,25 +598,51 @@ model orders {
 }
 
 model vendor_order_fulfillments {
-  id         Int       @id @default(autoincrement())
-  order_id   Int
-  vendor_id  Int
-  status     String    @default("pending")
-  gross_amount Decimal @default(0) @db.Decimal(10, 2)
-  commission_rate Decimal @default(0) @db.Decimal(5, 2)
-  commission_amount Decimal @default(0) @db.Decimal(10, 2)
-  net_amount Decimal @default(0) @db.Decimal(10, 2)
-  payout_status String @default("held")
-  created_at DateTime  @default(now())
-  updated_at DateTime?
+  id                Int       @id @default(autoincrement())
+  order_id          Int
+  vendor_id         Int
+  status            String    @default("pending")
+  gross_amount      Decimal   @default(0) @db.Decimal(10, 2)
+  commission_rate   Decimal   @default(0) @db.Decimal(5, 2)
+  commission_amount Decimal   @default(0) @db.Decimal(10, 2)
+  net_amount        Decimal   @default(0) @db.Decimal(10, 2)
+  payout_status     String    @default("held")
+  created_at        DateTime  @default(now())
+  updated_at        DateTime?
 
-  order  orders  @relation(fields: [order_id], references: [id], onDelete: Cascade)
-  vendor vendors @relation(fields: [vendor_id], references: [id], onDelete: Restrict)
-  history vendor_order_fulfillment_history[]
-  ledger_entries marketplace_ledger_entries[]
+  order          orders                             @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  vendor         vendors                            @relation(fields: [vendor_id], references: [id], onDelete: Restrict)
+  history        vendor_order_fulfillment_history[]
+  ledger_entries ledger_entries[]
+  payouts        vendor_payouts[]
 
   @@unique([order_id, vendor_id])
   @@index([vendor_id, status])
+}
+
+model vendor_payouts {
+  id             Int       @id @default(autoincrement())
+  vendor_id      Int
+  order_id       Int
+  fulfillment_id Int?
+  currency_id    Int
+  amount         Decimal   @db.Decimal(10, 2)
+  status         String    @default("pending")
+  payout_method  String    @default("bank_transfer")
+  reference      String?   @unique
+  metadata       Json?
+  created_at     DateTime  @default(now())
+  processed_at   DateTime?
+  paid_at        DateTime?
+
+  vendor      vendors                    @relation(fields: [vendor_id], references: [id], onDelete: Restrict)
+  order       orders                     @relation(fields: [order_id], references: [id], onDelete: Restrict)
+  fulfillment vendor_order_fulfillments? @relation(fields: [fulfillment_id], references: [id], onDelete: SetNull)
+  currency    currencies                 @relation(fields: [currency_id], references: [id], onDelete: Restrict)
+
+  @@index([vendor_id, status, created_at])
+  @@index([status, created_at])
+  @@map("vendor_payouts")
 }
 
 model vendor_order_fulfillment_history {
@@ -634,7 +678,7 @@ model platform_commission_settings_history {
   actor users? @relation("CommissionHistoryActor", fields: [changed_by], references: [id], onDelete: SetNull)
 }
 
-model marketplace_ledger_entries {
+model ledger_entries {
   id              BigInt   @id @default(autoincrement())
   vendor_id       Int?
   order_id        Int?
@@ -647,11 +691,11 @@ model marketplace_ledger_entries {
   metadata        Json?
   created_at      DateTime @default(now())
 
-  vendor     vendors?                    @relation(fields: [vendor_id], references: [id], onDelete: Restrict)
-  order      orders?                     @relation(fields: [order_id], references: [id], onDelete: Restrict)
+  vendor      vendors?                   @relation(fields: [vendor_id], references: [id], onDelete: Restrict)
+  order       orders?                    @relation(fields: [order_id], references: [id], onDelete: Restrict)
   fulfillment vendor_order_fulfillments? @relation(fields: [fulfillment_id], references: [id], onDelete: Restrict)
-  booking    service_bookings?           @relation(fields: [booking_id], references: [id], onDelete: Restrict)
-  currency   currencies                   @relation(fields: [currency_id], references: [id], onDelete: Restrict)
+  booking     service_bookings?          @relation(fields: [booking_id], references: [id], onDelete: Restrict)
+  currency    currencies                 @relation(fields: [currency_id], references: [id], onDelete: Restrict)
 
   @@index([vendor_id, created_at, id])
   @@index([order_id])
@@ -710,32 +754,32 @@ model shipping_addresses {
   updated_at DateTime? @updatedAt
 
   // Relations
-  user   users  @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  user   users   @relation(fields: [user_id], references: [id], onDelete: Cascade)
   orders orders? @relation(fields: [order_id], references: [id], onDelete: Cascade)
 
   @@index([user_id])
 }
 
 model payments {
-  booking_id Int? @unique
-  booking service_bookings? @relation(fields: [booking_id], references: [id], onDelete: Restrict)
+  booking_id         Int?              @unique
+  booking            service_bookings? @relation(fields: [booking_id], references: [id], onDelete: Restrict)
   events             payment_events[]
-  provider_ref       String?          @unique
+  provider_ref       String?           @unique
   checkout_data      String?
   initializing_until DateTime?
   paid_at            DateTime?
-  id                 Int              @id @default(autoincrement())
+  id                 Int               @id @default(autoincrement())
   order_id           Int?
   user_id            Int
   vendor_id          Int?
   gateway            String // paystack, stripe, etc
-  gateway_ref        String           @unique
-  amount             Decimal          @db.Decimal(10, 2)
+  gateway_ref        String            @unique
+  amount             Decimal           @db.Decimal(10, 2)
   currency_id        Int
-  status             String           @default("pending") // pending, completed, failed
+  status             String            @default("pending") // pending, completed, failed
   meta               String? // JSON metadata
-  created_at         DateTime         @default(now())
-  updated_at         DateTime?        @updatedAt
+  created_at         DateTime          @default(now())
+  updated_at         DateTime?         @updatedAt
 
   // Relations
   order             orders?          @relation(fields: [order_id], references: [id])
@@ -784,7 +828,7 @@ model shipments {
   id                 Int       @id @default(autoincrement())
   order_id           Int
   vendor_id          Int?
-  vendor             vendors? @relation(fields: [vendor_id], references: [id])
+  vendor             vendors?  @relation(fields: [vendor_id], references: [id])
   tracking_number    String?
   carrier            String?
   shipping_method    String?
@@ -805,7 +849,7 @@ model shipments {
 }
 
 model shipment_tracking_history {
-  changed_by Int?
+  changed_by  Int?
   id          Int       @id @default(autoincrement())
   shipment_id Int
   status      String
@@ -888,9 +932,9 @@ model reviews {
   updated_at        DateTime? @updatedAt
 
   // Relations
-  product products? @relation(fields: [product_id], references: [id], onDelete: Cascade)
-  service services? @relation(fields: [service_id], references: [id], onDelete: Cascade)
-  user    users     @relation(fields: [user_id], references: [id])
+  product products?         @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  service services?         @relation(fields: [service_id], references: [id], onDelete: Cascade)
+  user    users             @relation(fields: [user_id], references: [id])
   booking service_bookings? @relation(fields: [booking_id], references: [id], onDelete: SetNull)
 
   @@unique([user_id, product_id])
@@ -905,23 +949,23 @@ model reviews {
 // ===============================================
 
 model support_tickets {
-  id                     Int       @id @default(autoincrement())
-  ticket_number          String    @unique
-  subject                String
-  category               String?
-  priority               String    @default("medium") // low, medium, high
-  status                 String    @default("open") // open, in_progress, waiting_on_user, resolved
-  assigned_to            Int?
-  pending_assigned_to    Int?
-  transfer_requested_by  Int?
-  transfer_requested_at  DateTime?
-  assignee               users?    @relation("SupportAssignee", fields: [assigned_to], references: [id], onDelete: SetNull)
-  pending_assignee       users?    @relation("SupportTransferTarget", fields: [pending_assigned_to], references: [id], onDelete: SetNull)
-  transfer_requester     users?    @relation("SupportTransferRequester", fields: [transfer_requested_by], references: [id], onDelete: SetNull)
-  user_id                Int?
-  vendor_id              Int?
-  created_at             DateTime  @default(now())
-  updated_at             DateTime? @updatedAt
+  id                    Int       @id @default(autoincrement())
+  ticket_number         String    @unique
+  subject               String
+  category              String?
+  priority              String    @default("medium") // low, medium, high
+  status                String    @default("open") // open, in_progress, waiting_on_user, resolved
+  assigned_to           Int?
+  pending_assigned_to   Int?
+  transfer_requested_by Int?
+  transfer_requested_at DateTime?
+  assignee              users?    @relation("SupportAssignee", fields: [assigned_to], references: [id], onDelete: SetNull)
+  pending_assignee      users?    @relation("SupportTransferTarget", fields: [pending_assigned_to], references: [id], onDelete: SetNull)
+  transfer_requester    users?    @relation("SupportTransferRequester", fields: [transfer_requested_by], references: [id], onDelete: SetNull)
+  user_id               Int?
+  vendor_id             Int?
+  created_at            DateTime  @default(now())
+  updated_at            DateTime? @updatedAt
 
   // Relations
   user              users?                   @relation(fields: [user_id], references: [id])
@@ -1053,14 +1097,15 @@ model countries {
 }
 
 model currencies {
-  orders     orders[]
-  marketplace_ledger_entries marketplace_ledger_entries[]
-  id         Int       @id @default(autoincrement())
-  code       String    @unique
-  name       String
-  status     Boolean   @default(true)
-  created_at DateTime  @default(now())
-  updated_at DateTime? @updatedAt
+  orders         orders[]
+  ledger_entries ledger_entries[]
+  payouts        vendor_payouts[]
+  id             Int              @id @default(autoincrement())
+  code           String           @unique
+  name           String
+  status         Boolean          @default(true)
+  created_at     DateTime         @default(now())
+  updated_at     DateTime?        @updatedAt
 
   // Relations
   products  products[]
@@ -1108,9 +1153,10 @@ model services {
   meta_description          String?
   deleted_at                DateTime?
 
-  category          categories?      @relation(fields: [category_id], references: [id], onDelete: SetNull)
-  subcategory       subcategories?   @relation(fields: [subcategory_id], references: [id], onDelete: SetNull)
-  childcategory     childcategories? @relation(fields: [childcategory_id], references: [id], onDelete: SetNull)
+  category         categories?         @relation(fields: [category_id], references: [id], onDelete: SetNull)
+  subcategory      subcategories?      @relation(fields: [subcategory_id], references: [id], onDelete: SetNull)
+  childcategory    childcategories?    @relation(fields: [childcategory_id], references: [id], onDelete: SetNull)
+  serviceBookmarks service_bookmarks[]
 
   @@index([vendor_id, status])
   @@index([category_id])
@@ -1120,23 +1166,23 @@ model services {
 }
 
 model PlanVersion {
-  id                       Int             @id @default(autoincrement())
-  plan                     SubscriptionPlan
-  version                  Int
-  priceNaira               Decimal         @map("price_naira") @db.Decimal(12, 2)
-  commissionPercent        Decimal         @map("commission_percent") @db.Decimal(5, 2)
-  activeServices           Int?            @map("active_services")
-  packagesPerService       Int             @map("packages_per_service")
-  portfolioImages          Int             @map("portfolio_images")
-  promotedSlotsPerMonth    Int             @map("promoted_slots_per_month")
-  analytics                PlanAnalytics
-  support                  PlanSupport
-  isCurrent                Boolean         @default(false) @map("is_current")
-  paystackPlanCode         String?         @map("paystack_plan_code")
-  createdAt                DateTime        @default(now()) @map("created_at")
+  id                    Int              @id @default(autoincrement())
+  plan                  SubscriptionPlan
+  version               Int
+  priceNaira            Decimal          @map("price_naira") @db.Decimal(12, 2)
+  commissionPercent     Decimal          @map("commission_percent") @db.Decimal(5, 2)
+  activeServices        Int?             @map("active_services")
+  packagesPerService    Int              @map("packages_per_service")
+  portfolioImages       Int              @map("portfolio_images")
+  promotedSlotsPerMonth Int              @map("promoted_slots_per_month")
+  analytics             PlanAnalytics
+  support               PlanSupport
+  isCurrent             Boolean          @default(false) @map("is_current")
+  paystackPlanCode      String?          @map("paystack_plan_code")
+  createdAt             DateTime         @default(now()) @map("created_at")
 
-  subscriptions        Subscription[] @relation("SubscriptionCurrentPlan")
-  pendingSubscriptions Subscription[] @relation("SubscriptionPendingPlan")
+  subscriptions        Subscription[]      @relation("SubscriptionCurrentPlan")
+  pendingSubscriptions Subscription[]      @relation("SubscriptionPendingPlan")
   events               SubscriptionEvent[]
 
   @@unique([plan, version])
@@ -1166,21 +1212,21 @@ model PaystackWebhookEvent {
 }
 
 model SubscriptionRenewalEmail {
-  id                BigInt    @id @default(autoincrement())
-  eventKey          String    @unique @map("event_key")
-  providerId        Int       @map("provider_id")
-  userId            Int       @map("user_id")
-  recipientEmail    String    @map("recipient_email")
-  firstname         String?
-  currentPeriodEnd  DateTime  @map("current_period_end")
-  pendingPlan       SubscriptionPlan? @map("pending_plan")
-  status            String    @default("pending")
-  attempts          Int       @default(0)
-  availableAt       DateTime  @default(now()) @map("available_at")
-  processingUntil   DateTime? @map("processing_until")
-  lastError         String?   @map("last_error")
-  createdAt         DateTime  @default(now()) @map("created_at")
-  sentAt            DateTime? @map("sent_at")
+  id               BigInt            @id @default(autoincrement())
+  eventKey         String            @unique @map("event_key")
+  providerId       Int               @map("provider_id")
+  userId           Int               @map("user_id")
+  recipientEmail   String            @map("recipient_email")
+  firstname        String?
+  currentPeriodEnd DateTime          @map("current_period_end")
+  pendingPlan      SubscriptionPlan? @map("pending_plan")
+  status           String            @default("pending")
+  attempts         Int               @default(0)
+  availableAt      DateTime          @default(now()) @map("available_at")
+  processingUntil  DateTime?         @map("processing_until")
+  lastError        String?           @map("last_error")
+  createdAt        DateTime          @default(now()) @map("created_at")
+  sentAt           DateTime?         @map("sent_at")
 
   @@index([status, availableAt, createdAt])
   @@map("subscription_renewal_emails")
@@ -1223,9 +1269,9 @@ model Subscription {
   createdAt                DateTime           @default(now()) @map("created_at")
   updatedAt                DateTime           @updatedAt @map("updated_at")
 
-  provider          vendors      @relation(fields: [providerId], references: [id], onDelete: Cascade)
-  planDefinition    PlanVersion? @relation("SubscriptionCurrentPlan", fields: [plan, planVersion], references: [plan, version], onDelete: Restrict)
-  pendingDefinition PlanVersion? @relation("SubscriptionPendingPlan", fields: [pendingPlan, pendingPlanVersion], references: [plan, version], onDelete: Restrict)
+  provider          vendors             @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  planDefinition    PlanVersion?        @relation("SubscriptionCurrentPlan", fields: [plan, planVersion], references: [plan, version], onDelete: Restrict)
+  pendingDefinition PlanVersion?        @relation("SubscriptionPendingPlan", fields: [pendingPlan, pendingPlanVersion], references: [plan, version], onDelete: Restrict)
   events            SubscriptionEvent[]
 
   @@index([status, currentPeriodEnd])
@@ -1234,14 +1280,14 @@ model Subscription {
 }
 
 model SubscriptionEvent {
-  id             Int          @id @default(autoincrement())
-  subscriptionId Int?         @map("subscription_id")
-  providerId     Int?         @map("provider_id")
-  planVersionId  Int?         @map("plan_version_id")
+  id             Int      @id @default(autoincrement())
+  subscriptionId Int?     @map("subscription_id")
+  providerId     Int?     @map("provider_id")
+  planVersionId  Int?     @map("plan_version_id")
   type           String
-  eventKey       String?      @unique @map("event_key")
-  meta           Json         @default("{}")
-  createdAt      DateTime     @default(now()) @map("created_at")
+  eventKey       String?  @unique @map("event_key")
+  meta           Json     @default("{}")
+  createdAt      DateTime @default(now()) @map("created_at")
 
   subscription Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
   provider     vendors?      @relation(fields: [providerId], references: [id], onDelete: SetNull)
@@ -1252,38 +1298,89 @@ model SubscriptionEvent {
   @@map("subscription_events")
 }
 
+model promotions {
+  id                 Int       @id @default(autoincrement())
+  vendor_id          Int
+  target_type        String?   @default("vendor") // product, service, vendor, category, homepage_banner
+  target_id          Int?
+  placement          String    @default("homepage_banner") // homepage_banner, featured_strip, category_hero, vendor_banner
+  pricing_model      String    @default("dynamic") // fixed, dynamic, hybrid
+  base_daily_rate    Decimal?  @db.Decimal(10, 2)
+  min_total_price    Decimal?  @db.Decimal(10, 2)
+  default_multiplier Decimal?  @db.Decimal(10, 2)
+  auto_reprice       Boolean   @default(true)
+  title              String?
+  subtitle           String?
+  image_url          String?
+  cta_label          String?
+  cta_link           String?
+  start_at           DateTime
+  end_at             DateTime?
+  status             String    @default("draft") // draft, active, paused, expired
+  priority           Int       @default(0)
+  is_paid            Boolean   @default(false)
+  created_at         DateTime  @default(now())
+  updated_at         DateTime? @updatedAt
+
+  vendor vendors @relation(fields: [vendor_id], references: [id], onDelete: Cascade)
+
+  @@index([placement, status, priority, start_at])
+  @@index([vendor_id, status])
+  @@index([target_type, target_id])
+  @@map("promotions")
+}
+
+model promotion_pricing_rules {
+  id              Int       @id @default(autoincrement())
+  placement       String
+  keyword         String?
+  season          String?
+  multiplier      Decimal   @db.Decimal(10, 2)
+  base_daily_rate Decimal?  @db.Decimal(10, 2)
+  priority        Int       @default(0)
+  effective_from  DateTime?
+  effective_to    DateTime?
+  status          String    @default("active") // active, draft, archived
+  created_at      DateTime  @default(now())
+  updated_at      DateTime? @updatedAt
+
+  @@index([placement, status, priority])
+  @@index([keyword, season, status])
+  @@map("promotion_pricing_rules")
+}
+
 model service_bookings {
-  payment payments?
-  ledger_entries marketplace_ledger_entries[]
-  reviews reviews[]
-  id                        Int       @id @default(autoincrement())
-  service_id                Int       @map("service_id")
-  vendor_id                 Int       @map("vendor_id")
-  user_id                   Int       @map("user_id")
-  currency_id               Int       @map("currency_id")
+  payment                   payments?
+  ledger_entries            ledger_entries[]
+  reviews                   reviews[]
+  id                        Int              @id @default(autoincrement())
+  service_id                Int              @map("service_id")
+  vendor_id                 Int              @map("vendor_id")
+  user_id                   Int              @map("user_id")
+  currency_id               Int              @map("currency_id")
   service_name              String
-  total                     Decimal?  @db.Decimal(10, 2)
-  commission_rate           Decimal   @default(0) @db.Decimal(5, 2)
-  commission_amount         Decimal   @default(0) @db.Decimal(10, 2)
-  vendor_amount             Decimal   @default(0) @db.Decimal(10, 2)
+  total                     Decimal?         @db.Decimal(10, 2)
+  commission_rate           Decimal          @default(0) @db.Decimal(5, 2)
+  commission_amount         Decimal          @default(0) @db.Decimal(10, 2)
+  vendor_amount             Decimal          @default(0) @db.Decimal(10, 2)
   payment_method            String
-  payment_status            String    @default("unpaid") // unpaid, paid, refunded
+  payment_status            String           @default("unpaid") // unpaid, paid, refunded
   ends_at                   DateTime?
-  buffer_mins               Int       @default(0) @map("buffer_mins")
+  buffer_mins               Int              @default(0) @map("buffer_mins")
   location_type             String
-  location                  String    @map("location")
-  checkout_key              String    @map("checkout_key")
-  checkout_hash             String    @map("checkout_hash")
-  scheduled_for             DateTime  @map("scheduled_for")
-  cancellation_window_hours Int       @default(24) @map("cancellation_window_hours")
-  cancellation_fee_percent  Float     @default(0) @map("cancellation_fee_percent")
-  reservation_expires_at    DateTime? @default(dbgenerated("(now() + interval '24 hours')")) @map("reservation_expires_at")
-  created_at                DateTime  @default(now()) @map("created_at")
-  booking_status            String    @default("pending") @map("booking_status") // pending, accepted, declined, confirmed, active, completed, cancelled, expired, payment_review
-  note                      String?   @map("note")
+  location                  String           @map("location")
+  checkout_key              String           @map("checkout_key")
+  checkout_hash             String           @map("checkout_hash")
+  scheduled_for             DateTime         @map("scheduled_for")
+  cancellation_window_hours Int              @default(24) @map("cancellation_window_hours")
+  cancellation_fee_percent  Float            @default(0) @map("cancellation_fee_percent")
+  reservation_expires_at    DateTime?        @default(dbgenerated("(now() + interval '24 hours')")) @map("reservation_expires_at")
+  created_at                DateTime         @default(now()) @map("created_at")
+  booking_status            String           @default("pending") @map("booking_status") // pending, accepted, declined, confirmed, active, completed, cancelled, expired, payment_review
+  note                      String?          @map("note")
   vendor_response_note      String?
-  proposed_scheduled_for    DateTime? @db.Timestamptz(3)
-  proposed_ends_at          DateTime? @db.Timestamptz(3)
+  proposed_scheduled_for    DateTime?        @db.Timestamptz(3)
+  proposed_ends_at          DateTime?        @db.Timestamptz(3)
 
   // Relations
   service           services         @relation(fields: [service_id], references: [id]) // Linked safely here

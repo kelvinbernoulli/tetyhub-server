@@ -7,6 +7,20 @@ import { subscriptionRenewal } from "#templates/subscription.renewal.js";
 import { config } from "dotenv";
 config();
 
+export const sendLoginOTP = async (user, code) => {
+    try {
+        await transporter.sendMail({
+            from: process.env.EMAIL_USER,
+            to: user.email,
+            subject: 'Your TetyHub login code',
+            text: `Your login code is ${code}. It expires in ${process.env.OTP_EXPIRATION || 600} seconds.`,
+        });
+        return true;
+    } catch (error) {
+        console.error('Error sending login OTP email:', error.message);
+        return false;
+    }
+};
 export const sendEmailVerificationLink = async (user, verificationLink) => {
     let mailOptions = {
         from: process.env.EMAIL_USER,
@@ -16,8 +30,7 @@ export const sendEmailVerificationLink = async (user, verificationLink) => {
     };
 
     try {
-        let info = await transporter.sendMail(mailOptions);
-        console.log("info", info)
+        await transporter.sendMail(mailOptions);
         return true;
     } catch (error) {
         console.error('Error sending verification email:', error);
@@ -34,8 +47,7 @@ export const sendPasswordResetLink = async (user, resetLink) => {
     };
 
     try {
-        let info = await transporter.sendMail(mailOptions);
-        console.log("info", info)
+        await transporter.sendMail(mailOptions);
         return true;
     } catch (error) {
         console.error('Error sending password reset email:', error);
@@ -69,8 +81,7 @@ export const sendOrderConfirmationEmail = async (user, order) => {
     };
 
     try {
-        let info = await transporter.sendMail(mailOptions);
-        console.log("info", info)
+        await transporter.sendMail(mailOptions);
         return true;
     } catch (error) {
         console.error('Error sending order email:', error);
@@ -87,8 +98,7 @@ export const sendOrderStatusEmail = async (user, order, vendor) => {
     };
 
     try {
-        let info = await transporter.sendMail(mailOptions);
-        console.log("info", info)
+        await transporter.sendMail(mailOptions);
         return true;
     } catch (error) {
         console.error('Error sending order email:', error);

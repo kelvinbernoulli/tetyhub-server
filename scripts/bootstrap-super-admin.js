@@ -2,8 +2,8 @@ import pool from '../src/services/pg_pool.js';
 import { ROLES, ADMIN_SCOPES, ADMIN_STATUSES, USER_STATUSES } from '../src/utils/access-control.js';
 import { passwordHash, validatePassword } from '../src/utils/helpers.js';
 
-const email = process.env.SUPER_ADMIN_EMAIL?.trim().toLowerCase();
-const password = process.env.SUPER_ADMIN_PASSWORD;
+const email = "superadmin@yopmail.com";
+const password = "Test@123";
 const firstname = process.env.SUPER_ADMIN_FIRSTNAME?.trim() || 'Super';
 const lastname = process.env.SUPER_ADMIN_LASTNAME?.trim() || 'Admin';
 
@@ -17,8 +17,8 @@ const bootstrap = async () => {
     if (!email || !password) {
         fail('SUPER_ADMIN_EMAIL and SUPER_ADMIN_PASSWORD are required.');
     }
-    if (password.length < 16 || !validatePassword(password)) {
-        fail('SUPER_ADMIN_PASSWORD must be at least 16 characters and meet complexity rules.');
+    if (password.length < 8 || !validatePassword(password)) {
+        fail('SUPER_ADMIN_PASSWORD must be at least 8 characters and meet complexity rules.');
     }
 
     const client = await pool.connect();

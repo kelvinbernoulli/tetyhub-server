@@ -9,9 +9,7 @@ config();
 
 // generate otp code
 export const generateOTP = async () => {
-    const min = 100000;
-    const max = 999999;
-    const code = Math.floor(Math.random() * (max - min + 1)) + min;
+    const code = Crypto.randomInt(100000, 1000000);
     const now = new Date();
 
     return { code, now };
@@ -45,9 +43,7 @@ export const generateCode = () => {
     const characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
     let code = "";
     for (let i = 0; i < 9; i++) {
-        code += characters.charAt(
-            Math.floor(Math.random() * characters.length)
-        );
+        code += characters.charAt(Crypto.randomInt(0, characters.length));
     }
     return code;
 };
@@ -61,7 +57,7 @@ export const generatePasswordResetToken = async () => {
 
     let token = "";
     for (let i = 0; i < length; i++) {
-        const randomIndex = crypto.randomInt(0, charactersLength);
+        const randomIndex = Crypto.randomInt(0, charactersLength);
         token += characters[randomIndex];
     }
 

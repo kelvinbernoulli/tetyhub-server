@@ -17,8 +17,8 @@ export const addToWishList = async (req, res) => {
         if (!product_id) {
             return respondWithError(res, 400, 'Product ID is required', ERROR_CODES.VALIDATION_ERROR);
         }
-
-        const result = await Wishlist.addToWishlist(user.id, user.vendor_id, product_id);
+        
+        const result = await Wishlist.addToWishlist(user.id, parseInt(product_id));
         if (result?.error) {
             return respondWithError(res, result.code, result.error, ERROR_CODES.RESOURCE_NOT_FOUND);
         }
@@ -41,7 +41,7 @@ export const wishListItems = async (req, res) => {
 
         const { offset, limit } = pagination;
 
-        const result = await Wishlist.getWishlistItems(user.id, user.vendor_id, { offset, limit });
+        const result = await Wishlist.getWishlistItems(user.id, { offset, limit });
 
         return respondWithSuccess(res, 200, 'Wishlist items fetched successfully', result);
     } catch (error) {
@@ -59,13 +59,13 @@ export const removeFromWishList = async (req, res) => {
             return respondWithError(res, 401, 'Unauthorized', ERROR_CODES.UNAUTHORIZED);
         }
 
-        const { wishlist_item_id } = params;
+        const { item_id } = params;
 
-        if (!wishlist_item_id) {
+        if (!item_id) {
             return respondWithError(res, 400, 'Wishlist item ID is required', ERROR_CODES.VALIDATION_ERROR);
         }
 
-        const result = await Wishlist.removeFromWishlist(user.id, user.vendor_id, wishlist_item_id);
+        const result = await Wishlist.removeFromWishlist(user.id, Number(item_id));
         if (result?.error) {
             return respondWithError(res, result.code, result.error, ERROR_CODES.RESOURCE_NOT_FOUND);
         }
@@ -86,9 +86,9 @@ export const moveToCart = async (req, res) => {
             return respondWithError(res, 401, 'Unauthorized', ERROR_CODES.UNAUTHORIZED);
         }
 
-        const { wishlist_item_id } = params;
+        const { item_id } = params;
 
-        const result = await Wishlist.moveToCart(user.id, user.vendor_id, wishlist_item_id);
+        const result = await Wishlist.moveToCart(user.id, Number(item_id));
         if (result?.error) {
             return respondWithError(res, result.code, result.error, ERROR_CODES.VALIDATION_ERROR);
         }

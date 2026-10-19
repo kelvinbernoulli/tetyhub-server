@@ -63,5 +63,6 @@ export function startCheckoutWorker() {
     };
     const timer = setInterval(run, 30000);
     timer.unref();
+    void run();
     return () => clearInterval(timer);
 }

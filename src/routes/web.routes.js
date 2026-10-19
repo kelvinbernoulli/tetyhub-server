@@ -10,6 +10,7 @@ import * as OrderController from '#controllers/order.controller.js';
 import * as ShipmentController from '#controllers/shipment.controller.js';
 import * as ReturnController from '#controllers/return.controller.js';
 import * as WishlistController from '#controllers/wishlist.controller.js';
+import * as ServiceBookmarkController from '#controllers/service-bookmark.controller.js';
 import * as UsersController from '#controllers/users.controller.js';
 import * as CountriesController from '#controllers/countries.controller.js';
 import * as CategoriesController from '#controllers/categories.controller.js';
@@ -24,6 +25,7 @@ import { Router } from 'express';
 import { authenticated, isCustomer } from '#middlewares/auth.middleware.js';
 import * as PaymentController from '#controllers/payment.controller.js';
 import * as ServicesController from '#controllers/services.controller.js';
+import * as PromotionController from '#controllers/promotion.controller.js';
 const router = Router();
 
 
@@ -103,6 +105,12 @@ router.get(
     pagination,
     ProductController.getFeaturedProducts
 );
+router.get('/promotions/quote', PromotionController.estimatePromotionPrice);
+router.get(
+    '/promotions/landing-page',
+    pagination,
+    PromotionController.fetchLandingPagePromotions
+);
 
 //cart
 router.post(
@@ -177,6 +185,28 @@ router.post(
     authenticated,
     isCustomer,
     WishlistController.moveToCart
+);
+
+router.get(
+    '/service-bookmarks',
+    authenticated,
+    isCustomer,
+    pagination,
+    ServiceBookmarkController.getServiceBookmarks
+);
+router.post(
+    '/services/:serviceId/bookmark',
+    authenticated,
+    isCustomer,
+    requireCsrfProtection,
+    ServiceBookmarkController.addServiceBookmark
+);
+router.delete(
+    '/services/:serviceId/bookmark',
+    authenticated,
+    isCustomer,
+    requireCsrfProtection,
+    ServiceBookmarkController.removeServiceBookmark
 );
 
 router.get('/services', ServicesController.fetchPublicServices);

@@ -8,6 +8,7 @@ import * as ShipmentController from "#controllers/shipment.controller.js";
 import * as ReturnController from "#controllers/return.controller.js";
 import * as PermissionsController from "#controllers/permission.controller.js";
 import * as PaymentController from "#controllers/payment.controller.js";
+import * as PayoutController from "#controllers/payout.controller.js";
 import * as AdminsController from "#controllers/admin.controller.js";
 import * as TransactionHistoryController from "#controllers/transaction.history.controller.js";
 import * as AdminTypesController from "#controllers/admin.type.controller.js";
@@ -15,6 +16,7 @@ import * as CouponsController from "#controllers/coupon.controller.js";
 import * as ServicesController from "#controllers/services.controller.js";
 import * as ServicePackagesController from "#controllers/service-packages.controller.js";
 import * as SubscriptionController from "#controllers/subscription.controller.js";
+import * as PromotionController from "#controllers/promotion.controller.js";
 import pagination from "#middlewares/pagination.middleware.js";
 import { Router } from "express";
 import {
@@ -108,6 +110,13 @@ router.get('/payment/verify/:reference', canRead('payments'), PaymentController.
 //transactions
 router.get('/transactions', canRead('transactions'), pagination, TransactionHistoryController.getVendorTransactions);
 
+//payouts
+router.get('/payouts/summary', canRead('transactions'), PayoutController.getSummary);
+router.get('/payouts', canRead('transactions'), pagination, PayoutController.listPayouts);
+router.get('/payouts/:payoutId', canRead('transactions'), PayoutController.getPayoutById);
+router.patch('/payouts/:payoutId/process', canUpdate('transactions'), PayoutController.processPayout);
+router.patch('/payouts/:payoutId/settle', canUpdate('transactions'), PayoutController.settlePayout);
+
 //dashboard
 router.get("/dashboard/overview", canRead('dashboard'), VendorController.getDashboard);
 router.get("/dashboard/revenue-chart", canRead('dashboard'), VendorController.getRevenueChart);
@@ -135,5 +144,12 @@ router.get("/coupons", canRead('coupons'), pagination, CouponsController.fetchCo
 router.get("/coupons/view/:couponId", canRead('coupons'), CouponsController.fetchCouponById);
 router.patch("/coupons/update/:couponId", canUpdate('coupons'), CouponsController.updateCoupon);
 router.delete("/coupons/delete/:couponId", canDelete('coupons'), CouponsController.deleteCoupon);
+
+//promotions
+router.get('/promotions', canRead('promotions'), pagination, PromotionController.fetchVendorPromotions);
+router.get('/promotions/:promotionId', canRead('promotions'), PromotionController.fetchVendorPromotionById);
+router.post('/promotions/create', canCreate('promotions'), PromotionController.createPromotion);
+router.patch('/promotions/update/:promotionId', canUpdate('promotions'), PromotionController.updatePromotion);
+router.delete('/promotions/delete/:promotionId', canDelete('promotions'), PromotionController.deletePromotion);
 
 export default router;

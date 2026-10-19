@@ -115,7 +115,7 @@ export const ticketReplySchema = Joi.object({
 
     attachment,
 
-    is_internal: Joi.boolean().strict().valid(true, false)
+    is_internal: Joi.boolean().valid(true, false)
 })
     .or('message', 'attachment');
 

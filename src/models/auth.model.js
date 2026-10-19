@@ -1,11 +1,28 @@
 import redisClient from "#config/redis.js";
+import { createHash } from 'node:crypto';
 import pool from "#services/pg_pool.js";
-import { encrypt } from "#utils/encryption.js";
+import { createAuthToken, hashAuthToken } from "#utils/auth-token.js";
 import { buildRedisKey, frontendBase, generateOTP, ROLES } from "#utils/helpers.js";
-import { sendAdminRegistrationEmail, sendEmailVerificationLink, sendPasswordResetLink } from "./mail.model.js";
+import { sendAdminRegistrationEmail, sendEmailVerificationLink, sendLoginOTP, sendPasswordResetLink } from "./mail.model.js";
 import { select_by_keys } from "./query.model.js";
 import { config } from "dotenv";
 config();
+
+const otpAttemptKey = (identity, type) =>
+    `otp-attempts:${createHash('sha256')
+        .update(`${String(identity).trim().toLowerCase()}:${type}`, 'utf8')
+        .digest('hex')}`;
+
+const registerOtpAttempt = async (identity, type) => {
+    const key = otpAttemptKey(identity, type);
+    const attempts = await redisClient.incr(key);
+    if (attempts === 1) await redisClient.expire(key, 10 * 60);
+    return { key, allowed: attempts <= 5 };
+};
+const otpExpirationSeconds = () => {
+    const configured = Number(process.env.OTP_EXPIRATION ?? 600);
+    return Number.isFinite(configured) && configured > 0 ? configured : 600;
+};
 
 export class Auth {
     static async activateAccount(id) {
@@ -18,7 +35,6 @@ export class Auth {
         );
 
         const user = rows[0];
-        console.log('user', user)
         if (!user) throw Object.assign(
             new Error('User not found'),
             { status: 404, code: 'USER_NOT_FOUND' }
@@ -29,15 +45,14 @@ export class Auth {
             { status: 409, code: 'ALREADY_VERIFIED' }
         );
 
-        const { code } = await generateOTP();
-        const encryptedCode = encrypt(code.toString());
+        const token = createAuthToken();
 
         // Match buildRedisKey format
         const redisKey = buildRedisKey(user.email, 'email_verification');
-        await redisClient.set(redisKey, code.toString(), { EX: 30 * 60 }); // 30 minutes expiration
+        await redisClient.set(redisKey, hashAuthToken(token), { EX: 30 * 60 });
 
         const link = new URL('/verify-email', frontendBase);
-        link.searchParams.set('token', encryptedCode);
+        link.searchParams.set('token', token);
         link.searchParams.set('email', user.email);
 
         await sendEmailVerificationLink(user, link.toString());
@@ -60,16 +75,14 @@ export class Auth {
             { status: 404, code: 'USER_NOT_FOUND' }
         );
 
-        const { code } = await generateOTP();
-        const encryptedCode = encrypt(code.toString());
-        // console.log("Generated OTP for password reset:", encryptedCode);
+        const token = createAuthToken();
 
         // Match buildRedisKey format
         const redisKey = buildRedisKey(user.email, 'password_reset');
-        await redisClient.set(redisKey, code.toString(), { EX: 600 }); // 10 minutes expiration
+        await redisClient.set(redisKey, hashAuthToken(token), { EX: 600 });
         
         const link = new URL('/forgot-password', frontendBase);
-        link.searchParams.set('token', encryptedCode);
+        link.searchParams.set('token', token);
         link.searchParams.set('email', user.email);
 
         await sendPasswordResetLink(user, link.toString());
@@ -96,9 +109,13 @@ export class Auth {
     };
 
     static async saveOTP(user, type, medium = "email") {
+        if (medium === "sms") {
+            throw new Error("SMS OTP delivery is not configured.");
+        }
+        if (medium !== "email") {
+            throw new Error("Invalid OTP medium");
+        }
         const { code, now } = await generateOTP();
-        console.log("OTP", code);
-
         const otpExists = await select_by_keys("otp", {
             user_id: user.id,
             otp_type: type
@@ -112,6 +129,8 @@ export class Auth {
         } else {
             throw new Error("Invalid OTP medium");
         }
+        const identity = column === "email" ? user.email : user.phone;
+        await redisClient.del(otpAttemptKey(identity, type));
 
         const currentOtp = {
             user_id: user.id,
@@ -133,14 +152,16 @@ export class Auth {
                 SET otp = $1, ${column} = $2, created_at = $3 
                 WHERE user_id = $4 AND otp_type = $5
             `;
-            await pool.query(updateQuery, [code, user[column], now, user.id, otpType]);
+            await pool.query(updateQuery, [code, user[column], now, user.id, type]);
         }
 
         // Handle delivery method
         if (medium === "email" && type === "login") {
-            await mailModel.sendLoginOTP(user, code);
+            if (!(await sendLoginOTP(user, code))) {
+                throw new Error("Unable to deliver login OTP email.");
+            }
         } else if (medium === "sms") {
-            await sendSMS_OTP(code, user.phone);
+            throw new Error("SMS OTP delivery is not configured.");
         }
 
         return { success: true };
@@ -159,6 +180,10 @@ export class Auth {
 
     static async verifyEmailOTP(email, otp, otp_type, cleanup = true) {
         try {
+            const { key: attemptKey, allowed } = await registerOtpAttempt(email, otp_type);
+            if (!allowed) {
+                return { success: false, message: 'Too many OTP attempts; request a new code.' };
+            }
             const queryText = `SELECT otp, created_at FROM otp WHERE email = $1 AND otp_type = $2 LIMIT 1`;
 
             const result = await pool.query(queryText, [email, otp_type]);
@@ -175,11 +200,12 @@ export class Auth {
                 return { success: false, message: 'Invalid OTP; Check inputed or Resend!' };
             }
 
-            if (timeDifference > process.env.OTP_EXPIRATION) {
+            if (timeDifference > otpExpirationSeconds()) {
                 return { success: false, message: 'OTP expired; Resend!' };
             }
 
             // Delete OTP
+            await redisClient.del(attemptKey);
             if (cleanup === true) {
                 const deleteQueryText = `DELETE FROM otp WHERE email = $1 AND otp_type = $2`;
                 await pool.query(deleteQueryText, [email, otp_type]);
@@ -193,7 +219,10 @@ export class Auth {
     };
 
     static async verifySMS_OTP(phone, otp, otp_type) {
-        console.log("verifySMS_OTP", phone, otp, otp_type);
+        const { key: attemptKey, allowed } = await registerOtpAttempt(phone, otp_type);
+        if (!allowed) {
+            return { success: false, message: 'Too many OTP attempts; request a new code.' };
+        }
         const queryText = `SELECT otp, created_at FROM otp WHERE phone = $1 AND otp_type = $2 LIMIT 1`;
         try {
             const result = await pool.query(queryText, [phone, otp_type]);
@@ -211,10 +240,11 @@ export class Auth {
                 return { success: false, message: 'Invalid OTP; Check inputed or Resend!' };
             }
 
-            if (timeDifference > process.env.OTP_EXPIRATION) {
+            if (timeDifference > otpExpirationSeconds()) {
                 return { success: false, message: 'OTP expired; Resend!' };
             }
 
+            await redisClient.del(attemptKey);
             // Delete OTP
             const deleteQueryText = `DELETE FROM otp WHERE phone = $1 AND otp_type = $2`;
             await pool.query(deleteQueryText, [phone, otp_type]);
@@ -252,7 +282,6 @@ export class Auth {
                 period: 30
             });
             const delta = totp.validate({ token: otp });
-            console.log("delta", delta);
             if (delta === null) {
                 return { success: false, message: "OTP is invalid or has expired", code: 2 };
             }

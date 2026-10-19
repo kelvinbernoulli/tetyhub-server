@@ -48,6 +48,9 @@ const staffQuery = `SELECT u.id, u.firstname, u.lastname FROM users u JOIN admin
     )))`;
 
 const leastLoadedStaffQuery = `SELECT staff.id FROM (${staffQuery}) staff
+    WHERE staff.id IN (
+        SELECT u.id FROM users u WHERE u.role::text = 'admin'
+    )
     ORDER BY (
         SELECT COUNT(*) FROM support_tickets t
         WHERE t.assigned_to = staff.id

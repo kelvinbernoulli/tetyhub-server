@@ -493,6 +493,22 @@ class Order {
                 [fulfillment.id]
             );
             await client.query(
+                `INSERT INTO vendor_payouts
+                 (vendor_id, order_id, fulfillment_id, currency_id, amount, status, payout_method,
+                  reference, metadata)
+                 VALUES ($1, $2, $3, $4, $5, 'pending', 'bank_transfer', $6, $7)
+                 ON CONFLICT (reference) DO NOTHING`,
+                [
+                    vendorId,
+                    orderId,
+                    fulfillment.id,
+                    order.currency_id,
+                    fulfillment.net_amount,
+                    `payout:${orderId}:${vendorId}:${fulfillment.id}`,
+                    JSON.stringify({ confirmed_by: userId, source: 'delivery_confirmation' }),
+                ]
+            );
+            await client.query(
                 `INSERT INTO marketplace_ledger_entries
                  (vendor_id, order_id, fulfillment_id, entry_type, amount, currency_id,
                   idempotency_key, metadata)

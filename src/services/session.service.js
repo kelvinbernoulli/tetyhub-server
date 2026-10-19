@@ -27,7 +27,16 @@ export const establishAuthenticatedSession = async (req, user) => {
         throw new TypeError('A valid user is required to establish a session.');
     }
 
-    const { password, ...safeUser } = user;
+    const safeUser = {
+        id: user.id,
+        email: user.email,
+        firstname: user.firstname ?? null,
+        lastname: user.lastname ?? null,
+        role: user.role,
+        status: user.status,
+        email_verified: user.email_verified,
+        auth_version: user.auth_version,
+    };
     await regenerateSession(req);
 
     const authenticatedAt = Date.now();

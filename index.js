@@ -4,9 +4,7 @@ config();
 process.env.TZ = 'UTC';
 
 import express from 'express';
-import rateLimit from 'express-rate-limit';
 import cors from 'cors';
-import bodyParser from 'body-parser';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { UAParser } from 'ua-parser-js';
@@ -27,6 +25,9 @@ import {
 import { startCheckoutWorker } from '#services/checkout.worker.js';
 import { startSubscriptionLifecycleJob } from '#services/subscription-lifecycle.service.js';
 import passport from 'passport';
+import pool from '#services/pg_pool.js';
+import redisClient from '#config/redis.js';
+import { createRedisRateLimiter } from '#middlewares/auth-rate-limit.middleware.js';
 import sessionMiddleware from '#config/session.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -39,19 +40,25 @@ const REQUEST_SIZE_LIMIT = `${process.env.REQUEST_SIZE_LIMIT || 20}mb`;
 
 // Security
 app.use(helmet());
-app.set('trust proxy', 1);
+const trustedProxySetting = process.env.TRUST_PROXY?.trim();
+if (trustedProxySetting) {
+    const hopCount = Number(trustedProxySetting);
+    app.set(
+        'trust proxy',
+        Number.isInteger(hopCount) && hopCount >= 0
+            ? hopCount
+            : trustedProxySetting.split(',').map((entry) => entry.trim())
+    );
+}
 
-// Rate limiting — applied before body parsing
+// Shared across instances; auth routes apply tighter account-aware limits.
 app.use(
-    rateLimit({
-        windowMs: 5 * 60 * 1000, // 5 minutes
-        max: 5000,
-        message: 'Too many requests from this IP, please try again later.',
-        standardHeaders: true,
-        legacyHeaders: false,
+    createRedisRateLimiter({
+        scope: 'global',
+        windowSeconds: 5 * 60,
+        maxIp: 5000,
     })
 );
-
 // CORS
 const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? '')
     .split(',')
@@ -100,11 +107,10 @@ app.post(
 // Parsing
 app.use(cookieParser());
 app.use(sessionMiddleware);
-app.use(bodyParser.json({ limit: REQUEST_SIZE_LIMIT }));
-app.use(bodyParser.urlencoded({ limit: REQUEST_SIZE_LIMIT, extended: true }));
+app.use(express.json({ limit: REQUEST_SIZE_LIMIT }));
+app.use(express.urlencoded({ limit: REQUEST_SIZE_LIMIT, extended: true }));
 app.use(passport.initialize());
 
-app.use(express.json());
 // Static assets
 app.use('/assets', express.static(path.join(__dirname, 'assets')));
 
@@ -148,35 +154,54 @@ app.use((err, req, res, next) => {
         return res.status(403).json({
             success: false,
             message: 'CORS policy violation',
-            error: err.message,
         });
     }
 
-    res.status(err.status || 500).json({
+    const status = Number.isInteger(err.status) && err.status >= 400 && err.status < 500
+        ? err.status
+        : 500;
+    res.status(status).json({
         success: false,
-        message: err.message || 'Internal Server Error',
+        message: status === 500
+            ? 'Internal server error'
+            : err.message || 'Request failed',
         ...(process.env.NODE_ENV === 'development' && { stack: err.stack }),
     });
 });
 
 // Startup
 // const stopCheckoutWorker = startCheckoutWorker();
-// const shutdown = (signal) => {
-//     stopCheckoutWorker();
-//     console.log(`${signal} received: closing server`);
-//     server.close(() => {
-//         console.log('Server closed');
-//         process.exit(0);
-//     });
-// };
+// const stopPaystackWebhookWorker = startPaystackWebhookWorker();
+// const stopSubscriptionLifecycleJob = startSubscriptionLifecycleJob();
 
 const server = app.listen(PORT, () => {
     console.log(`Server running on port ${PORT} — http://localhost:${PORT}/`);
 });
-startPaystackWebhookWorker();
-startSubscriptionLifecycleJob();
 
-process.on('SIGTERM', () => shutdown('SIGTERM'));
-process.on('SIGINT', () => shutdown('SIGINT'));
+let shuttingDown = false;
+const shutdown = (signal) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`${signal} received: closing server and background workers`);
+    stopCheckoutWorker();
+    stopPaystackWebhookWorker();
+    stopSubscriptionLifecycleJob();
+
+    const forceExit = setTimeout(() => {
+        console.error('Graceful shutdown timed out.');
+        process.exit(1);
+    }, 15000);
+    forceExit.unref();
+
+    server.close(async (error) => {
+        if (error) console.error('HTTP server shutdown failed:', error);
+        await Promise.allSettled([pool.end(), redisClient.quit()]);
+        clearTimeout(forceExit);
+        process.exitCode = error ? 1 : 0;
+    });
+};
+
+// process.once('SIGTERM', () => shutdown('SIGTERM'));
+// process.once('SIGINT', () => shutdown('SIGINT'));
 
 export default app;

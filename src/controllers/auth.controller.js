@@ -12,13 +12,14 @@ import { buildRedisKey, frontendBase, generateCode, normalizePhone, passwordHash
 import CustomerModel from "#models/customer.model.js";
 import { respondWithError, respondWithSuccess } from "#utils/response.js";
 import redisClient from "#config/redis.js";
-import { decrypt } from "#utils/encryption.js";
+import { consumeAuthToken, hashAuthToken } from '#utils/auth-token.js';
 import pool from "#services/pg_pool.js";
 import passport from '#config/passport.js';
 import { generateCsrfToken } from '#utils/csrf.js';
 import crypto from 'crypto';
 import {
     establishAuthenticatedSession,
+    revokeUserSessions,
     SESSION_MAX_AGE_MS,
 } from '#services/session.service.js';
 
@@ -72,70 +73,66 @@ export const userSignup = async (req, res) => {
 export const verifyEmail = async (req, res) => {
     try {
         const { token, email } = req.query;
-
-        const decryptedToken = decrypt(token);
-
-        const redisKey = buildRedisKey(email, 'email_verification');
-
-        const stored = await redisClient.get(redisKey);
-
-        if (stored === null || stored === undefined || !stored) {
-            return respondWithError(res, 400, 'Verification link expired', ERROR_CODES.OTP_EXPIRED);
-        }
-
-        if (stored !== decryptedToken) {
+        if (
+            typeof token !== 'string' || !/^[a-f0-9]{64}$/i.test(token) ||
+            typeof email !== 'string' || !email.trim()
+        ) {
             return respondWithError(res, 400, 'Invalid verification link', ERROR_CODES.OTP_INVALID);
         }
 
-        const emailVerifyToken = crypto.randomBytes(20).toString("hex");
+        const redisKey = buildRedisKey(email, 'email_verification');
+        const consumed = await consumeAuthToken(redisClient, redisKey, hashAuthToken(token));
+        if (!consumed) {
+            return respondWithError(res, 400, 'Verification link is invalid or expired', ERROR_CODES.OTP_EXPIRED);
+        }
 
+        const emailVerifyToken = crypto.randomBytes(20).toString('hex');
         await transaction(pool, async (client) => {
             const { rows } = await client.query(
                 `UPDATE users SET email_verified = true, email_verification_token = $1,
                  email_verified_at = NOW(), status = 'active'
-                 WHERE email = $2 AND email_verified = false RETURNING id`, [emailVerifyToken, email]
+                 WHERE email = $2 AND email_verified = false RETURNING id`,
+                [emailVerifyToken, email.trim()]
             );
-            if (rows[0]) await Notification.createNotification(rows[0].id, 'account', 'Email verified',
-                'Your email address has been verified.', null, client);
+            if (rows[0]) {
+                await Notification.createNotification(
+                    rows[0].id,
+                    'account',
+                    'Email verified',
+                    'Your email address has been verified.',
+                    null,
+                    client
+                );
+            }
         });
 
-        await redisClient.del(redisKey);
-
         return respondWithSuccess(res, 200, 'Email verified successfully');
-
-        return res.redirect(`${frontendBase}/login?message=Email verified successfully`);
     } catch (error) {
         console.error('Error verifying email:', error);
         return respondWithError(res, 500, 'Internal server error', ERROR_CODES.INTERNAL_SERVER_ERROR);
     }
 };
-
 export const resendVerification = async (req, res) => {
+    const genericResponse = () =>
+        respondWithSuccess(res, 200, 'If the account can receive verification mail, a link will be sent.');
     try {
-        const { email } = req.body;
-
+        const email = typeof req.body?.email === 'string' ? req.body.email.trim() : '';
+        if (!email) {
+            return respondWithError(res, 400, 'A valid email is required', ERROR_CODES.VALIDATION_ERROR);
+        }
         const user = await UserModel.getUserByEmail(email);
-        if (!user) {
-            return respondWithError(res, 404, 'User not found', ERROR_CODES.RESOURCE_NOT_FOUND);
-        }
-
-        if (user.email_verified) {
-            return respondWithError(res, 400, 'Email already verified', ERROR_CODES.EMAIL_ALREADY_VERIFIED);
-        }
-
-        const resend = await Auth.activateAccount(user.id);
-        if (!resend.success) {
-            return respondWithError(res, 400, resend.message, resend.code);
-        }
-
-        return respondWithSuccess(res, 200, 'Verification link resent successfully');
-
-    } catch (err) {
-        console.error('Error resending verification link:', err);
+        if (!user || user.email_verified) return genericResponse();
+        setImmediate(() => {
+            void Auth.activateAccount(user.id).catch((error) =>
+                console.error('Unable to send verification email:', error.message)
+            );
+        });
+        return genericResponse();
+    } catch (error) {
+        console.error('Error resending verification link:', error);
         return respondWithError(res, 500, 'Internal server error', ERROR_CODES.INTERNAL_SERVER_ERROR);
     }
 };
-
 export const userSignin = async (req, res) => {
     try {
         const { body } = req;
@@ -147,21 +144,16 @@ export const userSignin = async (req, res) => {
         const { email, password } = value;
 
         const user = await UserModel.getUserByEmail(email);
-        if (!user) {
-            return respondWithError(res, 404, 'User not found', ERROR_CODES.RESOURCE_NOT_FOUND);
-        }
-
-        if (!user.email_verified) {
-            return respondWithError(res, 403, 'Email not verified', ERROR_CODES.EMAIL_NOT_VERIFIED);
-        }
-
-        if (user.status !== 'active') {
-            return respondWithError(res, 403, 'Account is not active', ERROR_CODES.ACCOUNT_INACTIVE);
-        }
-
-        const passwordValid = await verifyPassword(password, user.password);
-        if (!passwordValid) {
-            return respondWithError(res, 401, 'Invalid password', ERROR_CODES.INVALID_CREDENTIALS);
+        const passwordValid = user
+            ? await verifyPassword(password, user.password)
+            : (await passwordHash(password), false);
+        if (!user || !passwordValid || !user.email_verified || user.status !== 'active') {
+            return respondWithError(
+                res,
+                401,
+                'Invalid email or password',
+                ERROR_CODES.INVALID_CREDENTIALS
+            );
         }
 
         const session = await establishAuthenticatedSession(req, user);
@@ -241,77 +233,80 @@ export const signOut = async (req, res) => {
 
 export const requestPasswordReset = async (req, res) => {
     try {
-        const { email } = req.body;
+        const email = typeof req.body?.email === 'string' ? req.body.email.trim() : '';
+        if (!email) {
+            return respondWithError(res, 400, 'A valid email is required', ERROR_CODES.VALIDATION_ERROR);
+        }
 
         const user = await UserModel.getUserByEmail(email);
-        if (!user) {
-            return respondWithError(res, 404, 'User not found', ERROR_CODES.RESOURCE_NOT_FOUND);
+        if (user) {
+            setImmediate(() => {
+                void Auth.forgotPassword(email).catch((error) =>
+                    console.error('Unable to send password reset email:', error.message)
+                );
+            });
         }
-
-        const send = await Auth.forgotPassword(email);
-        if (!send.success) {
-            return respondWithError(res, 400, 'Failed to send password reset email', ERROR_CODES.EMAIL_SEND_FAILED);
-        }
-        return respondWithSuccess(res, 200, send.message, { email: user.email });
-
+        return respondWithSuccess(
+            res,
+            200,
+            'If an account matches that email, password reset instructions will be sent.'
+        );
     } catch (error) {
-        console.error(error);
+        console.error('Password reset request failed:', error);
         return respondWithError(res, 500, 'Internal server error', ERROR_CODES.INTERNAL_SERVER_ERROR);
     }
-}
-
+};
 export const confirmPasswordReset = async (req, res) => {
     try {
-        const { body, query } = req;
-        const { new_password } = body;
-        const { email, token } = query;
-
-        const decryptedToken = decrypt(token);
-
-        const redisKey = buildRedisKey(email, 'password_reset');
-
-        const stored = await redisClient.get(redisKey);
-
-        if (!stored) {
-            return respondWithError(res, 400, 'Verification link expired', ERROR_CODES.OTP_EXPIRED);
+        const { new_password } = req.body ?? {};
+        const { email, token } = req.query ?? {};
+        if (
+            typeof email !== 'string' || !email.trim() ||
+            typeof token !== 'string' || !/^[a-f0-9]{64}$/i.test(token)
+        ) {
+            return respondWithError(res, 400, 'Invalid or expired reset link', ERROR_CODES.OTP_INVALID);
+        }
+        if (!validatePassword(new_password)) {
+            return respondWithError(res, 422, 'Password does not meet the required criteria.', ERROR_CODES.VALIDATION_ERROR);
         }
 
-        if (stored !== decryptedToken) {
-            return respondWithError(res, 400, 'Invalid verification link', ERROR_CODES.OTP_INVALID);
+        const user = await UserModel.getUserByEmail(email.trim());
+        if (!user) {
+            return respondWithError(res, 404, 'User NOT found', ERROR_CODES.RESOURCE_NOT_FOUND);
         }
-
-        const passwordValid = validatePassword(new_password);
-        if (!passwordValid) {
-            return respondWithError(res, 422, "Password does not meet the requirements; it must be at least 8 characters long and contain a mix of uppercase, lowercase, numbers, and special characters.", ERROR_CODES.VALIDATION_ERROR);
-        }
-
-        const user = await UserModel.getUserByEmail(email);
-
-        const comparePassword = await verifyPassword(new_password, user.password);
-        if (comparePassword) {
+        if (await verifyPassword(new_password, user.password)) {
             return respondWithError(res, 400, 'New password cannot be the same as the old password', ERROR_CODES.VALIDATION_ERROR);
         }
 
-        const hashpassword = await passwordHash(new_password);
+        const redisKey = buildRedisKey(email, 'password_reset');
+        const consumed = await consumeAuthToken(redisClient, redisKey, hashAuthToken(token));
+        if (!consumed) {
+            return respondWithError(res, 400, 'Invalid or expired reset link', ERROR_CODES.OTP_EXPIRED);
+        }
 
+        const hashpassword = await passwordHash(new_password);
         await transaction(pool, async (client) => {
             await client.query(
                 `UPDATE users SET password = $1, auth_version = auth_version + 1
-                 WHERE id = $2`, [hashpassword, user.id]
+                 WHERE id = $2`,
+                [hashpassword, user.id]
             );
-            await Notification.createNotification(user.id, 'security', 'Password changed',
-                'Your account password was changed. Contact support if you did not make this change.', null, client);
+            await Notification.createNotification(
+                user.id,
+                'security',
+                'Password changed',
+                'Your account password was changed. Contact support if you did not make this change.',
+                null,
+                client
+            );
         });
-
-        await redisClient.del(redisKey);
-
+        await revokeUserSessions(user.id);
         return respondWithSuccess(res, 200, 'Password reset successfully');
     } catch (error) {
-        console.error(error);
+        console.error('Password reset failed:', error);
         return respondWithError(res, 500, 'Internal server error', ERROR_CODES.INTERNAL_SERVER_ERROR);
     }
-}
-
+};
 export const refreshSession = async (req, res) => {
     try {
         if (!req.session?.user) {
