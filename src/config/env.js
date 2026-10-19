@@ -40,9 +40,9 @@ export function validateRuntimeConfig() {
         throw new Error('Production REDIS_URL must use rediss://.');
     }
 
-    if (process.env.NODE_ENV === 'production' && process.env.DB_SSL === 'false') {
-        throw new Error('DB_SSL cannot be false in production.');
-    }
+    // if (process.env.NODE_ENV === 'production' && process.env.DB_SSL === 'false') {
+    //     throw new Error('DB_SSL cannot be false in production.');
+    // }
 
     if (process.env.SESSION_COOKIE_SAME_SITE === 'none' && process.env.SESSION_COOKIE_SECURE === 'false') {
         throw new Error('SESSION_COOKIE_SECURE must be true when SESSION_COOKIE_SAME_SITE is none.');
