@@ -109,17 +109,22 @@ export async function quote(client, userId, data = {}, lock = false) {
         console.log('Provided shipping quote IDs:', shippingQuoteIds);
     if (requiredPackageGroups.length && shippingQuoteIds.length === 0) {
         const { rows: defaultQuotes } = await client.query(
-            `SELECT q.id, q.package_group_key
-             FROM shipbubble_rate_quotes q
-             JOIN (
-                 SELECT DISTINCT ON (package_group_key) id
+            `WITH latest_batches AS (
+                 SELECT DISTINCT ON (package_group_key)
+                     package_group_key, request_token
                  FROM shipbubble_rate_quotes
                  WHERE user_id = $1 AND order_id IS NULL AND expires_at > NOW()
                    AND package_group_key = ANY($2::text[])
-                   AND quote_data->>'selected_by_default' = 'true'
                  ORDER BY package_group_key, created_at DESC, id DESC
-             ) latest ON latest.id = q.id
-             ORDER BY q.package_group_key`,
+             )
+             SELECT DISTINCT ON (q.package_group_key)
+                 q.id, q.package_group_key
+             FROM shipbubble_rate_quotes q
+             JOIN latest_batches latest
+               ON latest.package_group_key = q.package_group_key
+              AND latest.request_token = q.request_token
+             WHERE q.user_id = $1 AND q.order_id IS NULL AND q.expires_at > NOW()
+             ORDER BY q.package_group_key, q.amount ASC, q.created_at DESC, q.id DESC`,
             [userId, [...requiredGroupKeys]]
         );
         if (defaultQuotes.length !== requiredPackageGroups.length)

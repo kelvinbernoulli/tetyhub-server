@@ -23,7 +23,7 @@ export const addToWishList = async (req, res) => {
             return respondWithError(res, result.code, result.error, ERROR_CODES.RESOURCE_NOT_FOUND);
         }
 
-        return respondWithSuccess(res, 201, 'Item added to wishlist', result);
+        return respondWithSuccess(res, 200, 'Item added to wishlist', result);
     } catch (error) {
         console.error("Error adding wishlist:", error);
         return respondWithError(res, 500, error.message || 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);

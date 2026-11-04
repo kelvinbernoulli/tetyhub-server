@@ -112,6 +112,7 @@ export const verifyEmail = async (req, res) => {
         return respondWithError(res, 500, 'Internal server error', ERROR_CODES.INTERNAL_SERVER_ERROR);
     }
 };
+
 export const resendVerification = async (req, res) => {
     const genericResponse = () =>
         respondWithSuccess(res, 200, 'If the account can receive verification mail, a link will be sent.');
@@ -133,6 +134,7 @@ export const resendVerification = async (req, res) => {
         return respondWithError(res, 500, 'Internal server error', ERROR_CODES.INTERNAL_SERVER_ERROR);
     }
 };
+
 export const userSignin = async (req, res) => {
     try {
         const { body } = req;

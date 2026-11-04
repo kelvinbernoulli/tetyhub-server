@@ -49,7 +49,7 @@ export const addServiceBookmark = async (req, res) => {
                 ERROR_CODES.RESOURCE_NOT_FOUND
             );
         }
-        return respondWithSuccess(res, 201, 'Service bookmarked successfully', bookmark);
+        return respondWithSuccess(res, 200, 'Service bookmarked successfully', bookmark);
     } catch (error) {
         return handleError(res, error);
     }

@@ -227,7 +227,7 @@ router.post(
     ServiceBookmarkController.addServiceBookmark
 );
 router.delete(
-    '/services/:serviceId/bookmark',
+    '/services/bookmarks/:serviceId/remove',
     authenticated,
     isCustomer,
     requireCsrfProtection,
@@ -366,7 +366,7 @@ router.get(
     TransactionHistoryController.getTransactions
 );
 router.get(
-    '/transactions/:id',
+    '/transactions/:id/view',
     isCustomer,
     TransactionHistoryController.getTransactionById
 );
@@ -376,8 +376,8 @@ router.get("/vendor/settings/:id", pagination, SettingsController.fetchSettings)
 //reviews and ratings
 router.get('/products/:productId/reviews', ReviewController.fetchReviews);
 router.get('/services/:serviceId/reviews', ReviewController.fetchReviews);
-router.post('/products/:productId/reviews', authenticated, isCustomer, requireCsrfProtection, ReviewController.createReview);
-router.post('/services/:serviceId/reviews', authenticated, isCustomer, requireCsrfProtection, ReviewController.createReview);
+router.post('/reviews/product/:productId/create', authenticated, isCustomer, requireCsrfProtection, ReviewController.createReview);
+router.post('/reviews/service/:serviceId/create', authenticated, isCustomer, requireCsrfProtection, ReviewController.createReview);
 router.get('/reviews/mine', authenticated, isCustomer, ReviewController.fetchMyReviews);
 router.get('/reviews/:reviewId', authenticated, isCustomer, ReviewController.viewReview);
 router.patch('/reviews/:reviewId', authenticated, isCustomer, requireCsrfProtection, ReviewController.updateReview);

@@ -5,6 +5,7 @@ process.env.TZ = 'UTC';
 
 import express from 'express';
 import cors from 'cors';
+import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { UAParser } from 'ua-parser-js';
@@ -37,6 +38,13 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 const APP_VERSION = 'v1';
 const REQUEST_SIZE_LIMIT = `${process.env.REQUEST_SIZE_LIMIT || 20}mb`;
+
+// Keep query strings out of request logs because auth links carry bearer tokens.
+app.use(
+    morgan((tokens, req, res) =>
+        `${tokens.method(req, res)} ${req.path} ${tokens.status(req, res)} ${tokens['response-time'](req, res)} ms`
+    )
+);
 
 // Security
 app.use(helmet());
