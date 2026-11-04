@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import Payment from '#models/payment.model.js';
+import Shipment from '#models/shipment.model.js';
 import SubscriptionService from '#services/subscription.service.js';
 import pool from '#services/pg_pool.js';
 import { transaction } from '#utils/checkout.js';
@@ -212,4 +213,157 @@ export async function stripeWebhook(req, res) {
         return res.sendStatus(500);
     }
 }
-export default paystackWebhook;
+
+export async function shipBubbleWebhook(req, res) {
+    const secret = process.env.SHIPBUBBLE_WEBHOOK_SECRET;
+    const suppliedSecret =
+        req.headers['x-shipbubble-secret'] ??
+        (typeof req.headers.authorization === 'string' &&
+        req.headers.authorization.startsWith('Bearer ')
+            ? req.headers.authorization.slice(7)
+            : null) ??
+        req.query?.secret;
+    if (
+        !secret ||
+        typeof suppliedSecret !== 'string' ||
+        Buffer.byteLength(secret) !== Buffer.byteLength(suppliedSecret) ||
+        !crypto.timingSafeEqual(Buffer.from(secret), Buffer.from(suppliedSecret))
+    )
+        return res.sendStatus(401);
+
+    const payload = req.body;
+    const orderId = payload?.order_id === undefined || payload?.order_id === null
+        ? null
+        : String(payload.order_id);
+    const trackingCode = payload?.courier?.tracking_code;
+    const providerStatus =
+        typeof payload?.status === 'string' ? payload.status.toLowerCase() : null;
+    if (
+        !payload ||
+        typeof payload !== 'object' ||
+        Array.isArray(payload) ||
+        typeof orderId !== 'string' || !orderId.trim() ||
+        !providerStatus
+    )
+        return res.sendStatus(400);
+
+    const statusMap = {
+        pending: 'pending',
+        confirmed: 'shipped',
+        picked_up: 'shipped',
+        in_transit: 'in_transit',
+        completed: 'delivered',
+        cancelled: 'cancelled',
+    };
+    const nextStatus = statusMap[providerStatus];
+    if (!nextStatus) return res.sendStatus(200);
+
+    try {
+        const { rows } = await pool.query(
+            `SELECT id, vendor_id, status FROM shipments
+             WHERE shipbubble_order_id = $1
+             LIMIT 2`,
+            [orderId.trim()]
+        );
+        if (rows.length !== 1 || !rows[0].vendor_id) {
+            console.warn(
+                'ShipBubble webhook did not resolve to one vendor shipment:',
+                orderId
+            );
+            return res.sendStatus(404);
+        }
+
+        const shipment = rows[0];
+        const trackingUrl = payload.courier?.tracking_url ?? payload.tracking_url;
+        const waybillDocument = payload.waybill_document ?? payload.waybill_url;
+        const courierName = payload.courier?.name ?? payload.courier?.courier_name;
+        if (trackingCode || trackingUrl || waybillDocument || courierName) {
+            await pool.query(
+                `UPDATE shipments SET
+                    tracking_number = COALESCE($1, tracking_number),
+                    tracking_url = COALESCE($2, tracking_url),
+                    waybill_document = COALESCE($3, waybill_document),
+                    carrier = COALESCE($4, carrier), updated_at = NOW()
+                 WHERE id = $5`,
+                [trackingCode ?? null, trackingUrl ?? null, waybillDocument ?? null, courierName ?? null, shipment.id]
+            );
+        }
+        const events = Array.isArray(payload.events) ? payload.events : [];
+        const lastEvent = events.at(-1);
+        const trackingDescription =
+            (typeof lastEvent?.message === 'string' && lastEvent.message) ||
+            (typeof payload.courier?.tracking_message === 'string' &&
+                payload.courier.tracking_message) ||
+            `ShipBubble status: ${providerStatus}`;
+        const update = {
+            status: nextStatus,
+            location:
+                typeof lastEvent?.location === 'string'
+                    ? lastEvent.location.slice(0, 200)
+                    : null,
+            tracking_description: String(trackingDescription).slice(0, 500),
+        };
+        const statusRank = {
+            pending: 0,
+            processing: 1,
+            shipped: 2,
+            in_transit: 3,
+            out_for_delivery: 4,
+            delivered: 5,
+        };
+        const staleStatus =
+            (statusRank[nextStatus] !== undefined &&
+                statusRank[shipment.status] !== undefined &&
+                statusRank[nextStatus] < statusRank[shipment.status]) ||
+            (nextStatus === 'cancelled' &&
+                !['pending', 'processing', 'failed'].includes(shipment.status));
+        if (shipment.status === nextStatus || staleStatus) {
+            await Shipment.updateShipment(
+                shipment.id,
+                shipment.vendor_id,
+                {
+                    location: update.location,
+                    tracking_description: update.tracking_description,
+                },
+                null,
+                true,
+                true
+            );
+            return res.sendStatus(200);
+        }
+
+        // The internal state machine requires an initial shipped state before
+        // moving directly from pending/processing to an in-transit or delivered
+        // event, which ShipBubble may send without intermediate callbacks.
+        if (
+            ['in_transit', 'delivered'].includes(nextStatus) &&
+            ['pending', 'processing'].includes(shipment.status)
+        ) {
+            await Shipment.updateShipment(
+                shipment.id,
+                shipment.vendor_id,
+                {
+                    status: 'shipped',
+                    tracking_description: 'Shipment accepted by ShipBubble',
+                },
+                null,
+                true,
+                true
+            );
+        }
+        await Shipment.updateShipment(
+            shipment.id,
+            shipment.vendor_id,
+            update,
+            null,
+            true,
+            true
+        );
+        return res.sendStatus(200);
+    } catch (error) {
+        console.error('ShipBubble webhook processing failed:', error.message);
+        return res.sendStatus(
+            error.status >= 400 && error.status < 500 ? error.status : 500
+        );
+    }
+}

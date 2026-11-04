@@ -537,3 +537,31 @@ export const updateVendorSettings = async (req, res) => {
         return respondWithError(res, 500, 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);
     }
 };
+
+export const validateVendorPickupAddress = async (req, res) => {
+    try {
+        if (!req.auth?.userId) {
+            return respondWithError(res, 401, 'Unauthorized', ERROR_CODES.UNAUTHORIZED);
+        }
+        const vendorId = req.auth.vendorId;
+
+        if (!Number.isInteger(vendorId) || vendorId <= 0) {
+            return respondWithError(res, 403, 'Forbidden', ERROR_CODES.FORBIDDEN);
+        }
+
+        const vendorData = await Vendor.getVendorById(vendorId);
+        if (!vendorData) {
+            return respondWithError(res, 404, 'Vendor not found', ERROR_CODES.RESOURCE_NOT_FOUND);
+        }
+
+        const isValid = await Vendor.validatePickupAddress(vendorId);
+        if (!isValid) {
+            return respondWithError(res, 400, 'Pickup address is invalid', ERROR_CODES.VALIDATION_ERROR);
+        }
+
+        return respondWithSuccess(res, 200, 'Pickup address validated successfully', { isValid });
+    } catch (error) {
+        console.error('Error validating vendor pickup address:', error);
+        return respondWithError(res, 500, 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);
+    }
+};

@@ -158,6 +158,33 @@ class Notification {
         );
     }
 
+    static async notifyShipmentLabelBooked(
+        orderId,
+        userId,
+        shipment,
+        client = pool
+    ) {
+        const message = shipment.tracking_number
+            ? `Your shipping label is ready. Tracking number: ${shipment.tracking_number}.`
+            : 'Your shipping label is ready. Tracking details will appear here when available.';
+        return this.createNotification(
+            userId,
+            'shipment_update',
+            'Shipment booked',
+            message,
+            {
+                order_id: orderId,
+                shipment_id: shipment.id,
+                status: shipment.status,
+                tracking_number: shipment.tracking_number,
+                tracking_url: shipment.tracking_url,
+                waybill_document: shipment.waybill_document,
+                carrier: shipment.carrier,
+            },
+            client
+        );
+    }
+
     static async notifyReturnStatusUpdate(
         returnId,
         userId,

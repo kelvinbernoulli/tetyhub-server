@@ -22,7 +22,8 @@ export function validateShipmentTransition(previous, next) {
 // Missing vendors and delivery problems must never produce a delivered order.
 export function fulfillmentStatus(shipments, vendorCount) {
     if (!shipments.length) return null;
-    const complete = shipments.length === vendorCount && shipments.every(s => s.vendor_id);
+    const distinctVendors = new Set(shipments.map((shipment) => shipment.vendor_id).filter(Boolean));
+    const complete = distinctVendors.size === vendorCount && shipments.every(s => s.vendor_id);
     const statuses = shipments.map(s => s.status);
     if (complete && statuses.every(s => s === 'delivered')) return 'delivered';
     if (complete && statuses.every(s => ['out_for_delivery', 'delivered'].includes(s))) return 'out_for_delivery';

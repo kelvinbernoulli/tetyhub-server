@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import slugify from 'slugify';
 import { productObjectKey } from '#utils/product-media.js';
 import { productStockSql, productAvailableSql } from '#utils/product-stock.js';
+import { parseStoredDimensions } from '#utils/shipping-package.js';
 const PRODUCT_FIELDS = [
     'category_id',
     'subcategory_id',
@@ -26,6 +27,7 @@ const PRODUCT_FIELDS = [
     'length',
     'width',
     'height',
+    'shipbubble_category_id',
     'free_shipping',
     'status',
     'is_featured',
@@ -43,6 +45,9 @@ const VARIANT_FIELDS = [
     'stock',
     'low_stock_threshold',
     'weight',
+    'length',
+    'width',
+    'height',
 ];
 const PUBLIC_FIELDS = [
     'id',
@@ -70,6 +75,7 @@ const PUBLIC_FIELDS = [
     'length',
     'width',
     'height',
+    'shipbubble_category_id',
     'free_shipping',
     'status',
     'is_featured',
@@ -98,6 +104,26 @@ const checkPrices = (data) => {
             'Compare At Price must be greater than or equal to Price'
         );
 };
+function validateRequiredShippingData(product, variants = []) {
+    if (product.is_digital) return;
+    if (!Number.isSafeInteger(Number(product.shipbubble_category_id)) || Number(product.shipbubble_category_id) <= 0)
+        throw productError('Shipbubble Category ID is required for shippable products');
+    const validMeasurements = (item = {}) => {
+        const weight = Number(item.weight ?? product.weight);
+        const legacyDimensions = parseStoredDimensions(item.dimensions);
+        const dimensions = ['length', 'width', 'height'].map((side) =>
+            Number(item[side] ?? legacyDimensions?.[side] ?? product[side])
+        );
+        return Number.isFinite(weight) && weight > 0 &&
+            dimensions.every((side) => Number.isFinite(side) && side > 0 && side <= 500);
+    };
+    if (product.has_variants) {
+        if (!variants.length || variants.some((variant) => !validMeasurements(variant)))
+            throw productError('Weight and dimensions are required for every shippable variant');
+    } else if (!validMeasurements()) {
+        throw productError('Weight and all three dimensions are required for shippable products');
+    }
+}
 async function insert(client, table, data) {
     const keys = Object.keys(data);
     const { rows } = await client.query(
@@ -463,6 +489,18 @@ export class Product {
                 state
             );
             if (hasVariants !== undefined) fields.has_variants = hasVariants;
+            const nextProduct = { ...existing, ...fields };
+            const shippingFieldsChanged = [
+                'shipbubble_category_id', 'weight', 'length', 'width', 'height',
+                'free_shipping', 'is_digital', 'variants', 'has_variants',
+            ].some((key) => data[key] !== undefined);
+            if ((shippingFieldsChanged || data.status === 'active') && !nextProduct.is_digital) {
+                const { rows: variants } = await client.query(
+                    "SELECT weight, dimensions, length, width, height FROM product_variants WHERE product_id = $1 AND status = 'active'",
+                    [productId]
+                );
+                validateRequiredShippingData(nextProduct, variants);
+            }
             if (Object.keys(fields).length)
                 await updateRow(client, 'products', productId, fields);
             return Product.findByKey(

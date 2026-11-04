@@ -9,10 +9,14 @@ import { createHash, randomUUID } from 'node:crypto';
 import pool from './pg_pool.js';
 import Payment from '#models/payment.model.js';
 import {
+    shippingCartFingerprint,
+    shippingDestinationFingerprint,
+} from '#utils/shipping-address.js';
+import { groupShippingItems, itemShippingData } from '#utils/shipping-package.js';
+import {
     CheckoutError,
     minorUnits,
     majorUnits,
-    shippingMinor,
     assertGatewayCurrency,
     transaction,
 } from '#utils/checkout.js';
@@ -24,9 +28,13 @@ export async function quote(client, userId, data = {}, lock = false) {
     );
     if (!carts.length) throw new CheckoutError('Cart is empty', 400);
     const { rows: items } = await client.query(
-        `SELECT ci.id, ci.product_id, ci.variant_id, ci.quantity,
+        `SELECT ci.id AS cart_item_id, ci.id, ci.product_id, ci.variant_id, ci.quantity,
         p.vendor_id, p.name AS product_name, p.thumbnail, p.status, p.deleted_at, p.has_variants,
-        p.track_inventory, p.free_shipping, p.currency_id, c.code AS currency, c.status AS currency_active,
+        p.track_inventory, p.free_shipping, p.is_digital, p.weight, p.length, p.width, p.height,
+        p.shipbubble_category_id,
+        pv.weight AS variant_weight, pv.dimensions AS variant_dimensions,
+        pv.length AS variant_length, pv.width AS variant_width, pv.height AS variant_height,
+        p.currency_id, c.code AS currency, c.status AS currency_active,
         CASE WHEN ci.variant_id IS NULL THEN p.price ELSE pv.price END AS price,
         CASE WHEN ci.variant_id IS NULL THEN p.stock ELSE pv.stock END AS stock,
         pv.status AS variant_status, pv.product_id AS variant_product_id
@@ -87,7 +95,130 @@ export async function quote(client, userId, data = {}, lock = false) {
     }
     const subtotal = items.reduce((sum, item) => sum + item.subtotal_minor, 0);
     minorUnits(majorUnits(subtotal));
-    const shipping = shippingMinor(items, currency, data.country);
+    let selectedShippingQuotes = [];
+    let shipping;
+    const paidShippingItems = items.filter((item) => !item.is_digital && !item.free_shipping);
+    if (paidShippingItems.some((item) => !Number.isSafeInteger(Number(item.shipbubble_category_id)) || Number(item.shipbubble_category_id) <= 0))
+        throw new CheckoutError('A ShipBubble category is missing from a shippable product', 422);
+    const requiredPackageGroups = groupShippingItems(items);
+    console.log('Required Package Groups:', requiredPackageGroups);
+    const requiredGroupKeys = new Set(requiredPackageGroups.map((group) => group.package_group_key));
+    let shippingQuoteIds = Array.isArray(data.shipping_quote_ids)
+        ? data.shipping_quote_ids
+        : [];
+        console.log('Provided shipping quote IDs:', shippingQuoteIds);
+    if (requiredPackageGroups.length && shippingQuoteIds.length === 0) {
+        const { rows: defaultQuotes } = await client.query(
+            `SELECT q.id, q.package_group_key
+             FROM shipbubble_rate_quotes q
+             JOIN (
+                 SELECT DISTINCT ON (package_group_key) id
+                 FROM shipbubble_rate_quotes
+                 WHERE user_id = $1 AND order_id IS NULL AND expires_at > NOW()
+                   AND package_group_key = ANY($2::text[])
+                   AND quote_data->>'selected_by_default' = 'true'
+                 ORDER BY package_group_key, created_at DESC, id DESC
+             ) latest ON latest.id = q.id
+             ORDER BY q.package_group_key`,
+            [userId, [...requiredGroupKeys]]
+        );
+        if (defaultQuotes.length !== requiredPackageGroups.length)
+            throw new CheckoutError(
+                'Shipping rates are missing or expired for one or more packages; request rates again',
+                409
+            );
+        shippingQuoteIds = defaultQuotes.map((quote) => quote.id);
+    }
+    if (shippingQuoteIds.length) {
+        if (shippingQuoteIds.length !== requiredPackageGroups.length)
+            throw new CheckoutError(
+                'Select one ShipBubble shipping option for each package',
+                422
+            );
+        const selected = await client.query(
+            `SELECT id, vendor_id, package_group_key, amount, currency, courier_name, quote_data
+             FROM shipbubble_rate_quotes
+             WHERE id = ANY($1::uuid[]) AND user_id = $2
+               AND order_id IS NULL AND expires_at > NOW()
+             ${lock ? 'FOR UPDATE' : ''}`,
+            [shippingQuoteIds, userId]
+        );
+        if (selected.rows.length !== shippingQuoteIds.length)
+            throw new CheckoutError(
+                'A selected ShipBubble rate expired; request shipping rates again',
+                409
+            );
+        const byPackageGroup = new Map();
+        const destinationFingerprint =
+            data.address && data.city && data.state && data.country
+                ? shippingDestinationFingerprint(data)
+                : null;
+        for (const selectedQuote of selected.rows) {
+            if (byPackageGroup.has(selectedQuote.package_group_key))
+                throw new CheckoutError(
+                    'Select only one ShipBubble option per package',
+                    422
+                );
+            if (selectedQuote.currency !== currency)
+                throw new CheckoutError(
+                    'ShipBubble rate currency does not match the order',
+                    422
+                );
+            if (
+                destinationFingerprint &&
+                selectedQuote.quote_data?.destination_fingerprint !==
+                    destinationFingerprint
+            )
+                throw new CheckoutError(
+                    'The delivery address changed; request ShipBubble rates again',
+                    409
+                );
+            const packageGroup = requiredPackageGroups.find(
+                (group) => group.package_group_key === selectedQuote.package_group_key
+            );
+            if (!packageGroup || Number(selectedQuote.vendor_id) !== packageGroup.vendor_id ||
+                Number(selectedQuote.quote_data?.category_id) !== packageGroup.category_id)
+                throw new CheckoutError(
+                    'A selected ShipBubble rate does not match a shipping package in this cart',
+                    422
+                );
+            const packageItems = packageGroup.items;
+            const cartFingerprint = shippingCartFingerprint(
+                packageItems.map((item) => {
+                    const { weight, dimensions } = itemShippingData(item);
+                    return {
+                        ...item,
+                        length: dimensions.length,
+                        width: dimensions.width,
+                        height: dimensions.height,
+                        unit_weight: weight,
+                        unit_amount: item.price,
+                    };
+                })
+            );
+            if (selectedQuote.quote_data?.cart_fingerprint !== cartFingerprint)
+                throw new CheckoutError(
+                    'The cart changed; request ShipBubble rates again',
+                    409
+                );
+            byPackageGroup.set(selectedQuote.package_group_key, selectedQuote);
+        }
+        if (
+            [...requiredGroupKeys].some((groupKey) => !byPackageGroup.has(groupKey)) ||
+            [...byPackageGroup.keys()].some((groupKey) => !requiredGroupKeys.has(groupKey))
+        )
+            throw new CheckoutError(
+                'Select a ShipBubble option for each shipping package',
+                422
+            );
+        shipping = selected.rows.reduce(
+            (total, row) => total + minorUnits(row.amount),
+            0
+        );
+        selectedShippingQuotes = selected.rows;
+    } else {
+        shipping = 0;
+    }
     minorUnits(majorUnits(shipping));
     let discount = 0,
         coupon = null;
@@ -150,6 +281,7 @@ export async function quote(client, userId, data = {}, lock = false) {
         currency_id: items[0].currency_id,
         subtotal: majorUnits(subtotal),
         shipping_fee: majorUnits(shipping),
+        shipping_quotes: selectedShippingQuotes,
         discount: majorUnits(discount),
         total: majorUnits(total),
         coupon,
@@ -233,10 +365,29 @@ export async function processCheckout(user, data) {
         );
         
         const order = rows[0];
+        if (preview.shipping_quotes.length) {
+            const consumedQuotes = await client.query(
+                `UPDATE shipbubble_rate_quotes SET order_id = $1
+                 WHERE id = ANY($2::uuid[]) AND user_id = $3 AND order_id IS NULL
+                 RETURNING id`,
+                [
+                    order.id,
+                    preview.shipping_quotes.map((shippingQuote) => shippingQuote.id),
+                    user.id,
+                ]
+            );
+            if (consumedQuotes.rows.length !== preview.shipping_quotes.length)
+                throw new CheckoutError(
+                    'A selected ShipBubble rate was already used; request rates again',
+                    409
+                );
+        }
         for (const item of preview.items) {
             await client.query(
-                `INSERT INTO order_items (order_id,vendor_id,product_id,variant_id,quantity,price,subtotal,stock_reserved)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+                `INSERT INTO order_items
+                    (order_id,vendor_id,product_id,variant_id,quantity,price,subtotal,
+                     stock_reserved,shipbubble_category_id)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
                 [
                     order.id,
                     item.vendor_id,
@@ -246,6 +397,7 @@ export async function processCheckout(user, data) {
                     item.price,
                     item.subtotal,
                     item.track_inventory,
+                    item.shipbubble_category_id ?? null,
                 ]
             );
             if (item.track_inventory) {
@@ -419,6 +571,13 @@ export async function releaseReservation(client, order, reason) {
     await client.query(
         "UPDATE orders SET status = 'cancelled', reservation_expires_at = NULL, updated_at = NOW() WHERE id = $1",
         [order.id]
+    );
+    await client.query(
+        `UPDATE shipbubble_rate_quotes
+         SET booking_status = 'failed', processing_until = NULL,
+             booking_error = COALESCE(booking_error, $2)
+         WHERE order_id = $1 AND booking_status = 'unpaid'`,
+        [order.id, String(reason).slice(0, 500)]
     );
     await client.query(
         "UPDATE vendor_order_fulfillments SET status = 'cancelled', updated_at = NOW() WHERE order_id = $1",

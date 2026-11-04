@@ -267,6 +267,12 @@ export class Payment {
                     [order.id]
                 );
                 await recordProductSale(client, order.id);
+                await client.query(
+                    `UPDATE shipbubble_rate_quotes
+                     SET booking_status = 'pending'
+                     WHERE order_id = $1 AND booking_status = 'unpaid'`,
+                    [order.id]
+                );
             }
             await client.query(
                 'INSERT INTO order_status_history (order_id,status,note) VALUES ($1,$2,$3)',

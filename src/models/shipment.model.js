@@ -11,7 +11,7 @@ import {
 const editableFields = ['tracking_number', 'carrier', 'shipping_method', 'estimated_delivery', 'shipping_cost', 'status', 'notes'];
 const publicFields = ['tracking_number', 'carrier', 'shipping_method', 'estimated_delivery', 'status'];
 
-async function syncOrder(client, order, changedBy) {
+export async function syncOrderFulfillment(client, order, changedBy = null) {
     if (['cancelled', 'returned', 'refunded', 'payment_review'].includes(order.status)) return;
     const { rows: shipments } = await client.query('SELECT vendor_id, status FROM shipments WHERE order_id = $1', [order.id]);
     const { rows } = await client.query('SELECT COUNT(DISTINCT vendor_id)::int AS count FROM order_items WHERE order_id = $1 AND product_id IS NOT NULL', [order.id]);
@@ -21,11 +21,14 @@ async function syncOrder(client, order, changedBy) {
     );
     if (groups.length) {
         for (const group of groups) {
-            const shipment = shipments.find((item) => item.vendor_id === group.vendor_id);
-            if (!shipment) continue;
+            const vendorShipmentStatuses = shipments
+                .filter((item) => item.vendor_id === group.vendor_id)
+                .map((item) => shipmentFulfillmentStatus(item.status))
+                .filter(Boolean);
+            if (!vendorShipmentStatuses.length) continue;
             const nextStatus = advanceFulfillmentStatus(
                 group.status,
-                shipmentFulfillmentStatus(shipment.status)
+                aggregateFulfillmentStatus(vendorShipmentStatuses, group.status)
             );
             if (nextStatus !== group.status) {
                 await client.query(
@@ -81,6 +84,18 @@ class Shipment {
             if (order.payment_status !== 'paid' || !['processing', 'awaiting_shipment', 'packed', 'shipped', 'out_for_delivery'].includes(order.status)) {
                 throw new CheckoutError('Only paid orders awaiting fulfillment can be shipped', 422);
             }
+            const ShipbubbleBooking = await client.query(
+                `SELECT id FROM shipbubble_rate_quotes
+                 WHERE order_id = $1 AND vendor_id = $2
+                   AND booking_status IN ('pending', 'processing', 'completed', 'needs_review')
+                 LIMIT 1`,
+                [orderId, vendorId]
+            );
+            if (ShipbubbleBooking.rows.length)
+                throw new CheckoutError(
+                    'This vendor shipment is being handled by Shipbubble',
+                    409
+                );
             const existing = await client.query(
                 'SELECT id FROM shipments WHERE order_id = $1 AND (vendor_id = $2 OR vendor_id IS NULL)', [orderId, vendorId]
             );
@@ -93,13 +108,20 @@ class Shipment {
             );
             const shipment = created[0];
             await history(client, shipment, { ...data, description: 'Shipment created' }, changedBy);
-            await syncOrder(client, order, changedBy);
+            await syncOrderFulfillment(client, order, changedBy);
             await Notification.notifyShipmentUpdate(order.id, order.user_id, shipment, client);
             return shipment;
         });
     }
 
-    static async updateShipment(shipmentId, vendorId, data, changedBy = null, tracking = false) {
+    static async updateShipment(
+        shipmentId,
+        vendorId,
+        data,
+        changedBy = null,
+        tracking = false,
+        deduplicateTracking = false
+    ) {
         if (!vendorId) throw new CheckoutError('Forbidden', 403);
         return transaction(pool, async client => {
             // Lock the order first on every write, serializing fulfillment across its vendors.
@@ -115,11 +137,56 @@ class Shipment {
             const { rows } = await client.query('SELECT * FROM shipments WHERE id = $1 AND vendor_id = $2 FOR UPDATE', [shipmentId, vendorId]);
             const shipment = rows[0];
             if (!shipment) throw new CheckoutError('Shipment not found', 404);
-            if (data.status !== undefined) validateShipmentTransition(shipment.status, data.status);
-            const fields = editableFields.filter(field => data[field] !== undefined);
-            const values = fields.map(field => data[field]);
+            let updateData = data;
+            let staleInternalAcceptance = false;
+            if (deduplicateTracking && tracking && data.status !== undefined) {
+                const statusRank = {
+                    pending: 0,
+                    processing: 1,
+                    shipped: 2,
+                    in_transit: 3,
+                    out_for_delivery: 4,
+                    delivered: 5,
+                };
+                const staleStatus =
+                    (statusRank[data.status] !== undefined &&
+                        statusRank[shipment.status] !== undefined &&
+                        statusRank[data.status] < statusRank[shipment.status]) ||
+                    (data.status === 'cancelled' &&
+                        !['pending', 'processing', 'failed'].includes(shipment.status));
+                if (staleStatus) {
+                    staleInternalAcceptance = data.status === 'shipped';
+                    updateData = { ...data };
+                    delete updateData.status;
+                }
+            }
+            if (deduplicateTracking && tracking) {
+                const { rows: latestEvents } = await client.query(
+                    `SELECT status, location, description
+                     FROM shipment_tracking_history
+                     WHERE shipment_id = $1
+                     ORDER BY created_at DESC, id DESC LIMIT 1`,
+                    [shipmentId]
+                );
+                const latest = latestEvents[0];
+                if (staleInternalAcceptance) return latest ?? shipment;
+                const eventStatus = updateData.status ?? shipment.status;
+                if (
+                    latest &&
+                    latest.status === eventStatus &&
+                    latest.location === (updateData.location ?? null) &&
+                    latest.description ===
+                        (updateData.tracking_description ??
+                            `Shipment ${eventStatus.replaceAll('_', ' ')}`)
+                )
+                    return latest;
+            }
+            if (updateData.status !== undefined)
+                validateShipmentTransition(shipment.status, updateData.status);
+            const fields = editableFields.filter(field => updateData[field] !== undefined);
+            const values = fields.map(field => updateData[field]);
             const updates = fields.map((field, index) => `${field} = $${index + 1}`);
-            if (data.status === 'delivered' && shipment.status !== 'delivered') updates.push('actual_delivery = NOW()');
+            if (updateData.status === 'delivered' && shipment.status !== 'delivered') updates.push('actual_delivery = NOW()');
             let updated = shipment;
             if (updates.length) {
                 values.push(shipmentId);
@@ -128,11 +195,11 @@ class Shipment {
                 );
                 updated = result.rows[0];
             }
-            const changed = data.status !== undefined && data.status !== shipment.status;
-            const hasEvent = tracking || changed || data.location !== undefined || data.tracking_description !== undefined;
-            const event = hasEvent ? await history(client, updated, data, changedBy) : null;
-            if (changed) await syncOrder(client, order, changedBy);
-            if (hasEvent || publicFields.some(field => data[field] !== undefined && String(data[field]) !== String(shipment[field]))) {
+            const changed = updateData.status !== undefined && updateData.status !== shipment.status;
+            const hasEvent = tracking || changed || updateData.location !== undefined || updateData.tracking_description !== undefined;
+            const event = hasEvent ? await history(client, updated, updateData, changedBy) : null;
+            if (changed) await syncOrderFulfillment(client, order, changedBy);
+            if (hasEvent || publicFields.some(field => updateData[field] !== undefined && String(updateData[field]) !== String(shipment[field]))) {
                 await Notification.notifyShipmentUpdate(order.id, order.user_id, updated, client);
             }
             return tracking ? event : updated;
@@ -151,7 +218,9 @@ class Shipment {
                     'product_name', p.name, 'quantity', oi.quantity, 'variant_id', oi.variant_id) ORDER BY oi.id)
                  FROM order_items oi LEFT JOIN products p ON p.id = oi.product_id
                  WHERE oi.order_id = s.order_id AND oi.product_id IS NOT NULL
-                   AND oi.vendor_id = s.vendor_id), '[]'::json) AS items,
+                   AND oi.vendor_id = s.vendor_id
+                   AND (s.shipping_group_key IS NULL OR
+                        oi.shipbubble_category_id = s.shipbubble_category_id)), '[]'::json) AS items,
                 COALESCE((SELECT json_agg(json_build_object('id', h.id, 'status', h.status, 'location', h.location,
                     'description', h.description, 'created_at', h.created_at) ORDER BY h.created_at, h.id)
                  FROM shipment_tracking_history h WHERE h.shipment_id = s.id), '[]'::json) AS tracking_history

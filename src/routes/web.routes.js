@@ -6,6 +6,7 @@ import * as SupportTicketController from '#controllers/support.ticket.controller
 import * as SettingsController from '#controllers/settings.controller.js';
 import * as ProductController from '#controllers/product.controller.js';
 import * as CartController from '#controllers/cart.controller.js';
+import * as ShippingRatesController from '#controllers/shipping-rates.controller.js';
 import * as OrderController from '#controllers/order.controller.js';
 import * as ShipmentController from '#controllers/shipment.controller.js';
 import * as ReturnController from '#controllers/return.controller.js';
@@ -26,7 +27,11 @@ import { authenticated, isCustomer } from '#middlewares/auth.middleware.js';
 import * as PaymentController from '#controllers/payment.controller.js';
 import * as ServicesController from '#controllers/services.controller.js';
 import * as PromotionController from '#controllers/promotion.controller.js';
+import * as ActivityController from '#controllers/activity.controller.js';
 const router = Router();
+
+router.get('/activity-logs', authenticated, pagination, ActivityController.fetchUserLogs);
+router.get('/activity-logs/:id', authenticated, ActivityController.fetchUserLogDetails);
 
 
 const checkoutLimit = rateLimit({
@@ -140,6 +145,26 @@ router.delete(
 );
 
 //checkout
+router.get(
+    '/cart/shipping-categories',
+    authenticated,
+    isCustomer,
+    ShippingRatesController.getShipbubblePackageCategories
+);
+router.post(
+    '/cart/shipping-rates',
+    authenticated,
+    isCustomer,
+    checkoutLimit,
+    ShippingRatesController.getCartShippingRates
+);
+router.post(
+    '/cart/shipping-rates/:vendorId',
+    authenticated,
+    isCustomer,
+    checkoutLimit,
+    ShippingRatesController.getVendorShippingRates
+);
 router.get(
     '/cart/preview-checkout',
     authenticated,

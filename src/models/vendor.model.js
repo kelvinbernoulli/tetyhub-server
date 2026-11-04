@@ -69,12 +69,12 @@ class VendorModel {
 
     static async getVendorByEmail(email) {
         const { rows } = await pool.query(
-            `SELECT u.*, v.*
+            `SELECT u.*, v.*, vs.*
                 FROM users u
                 JOIN vendors v ON v.user_id = u.id
+                JOIN vendor_settings vs ON vs.vendor_id = v.id
                 WHERE u.email = $1
-                AND u.role = $2
-                AND u.deleted_at IS NULL`,
+                AND u.role = $2`,
             [email, ROLES.VENDOR]
         );
         return rows[0] ?? null;
@@ -82,12 +82,12 @@ class VendorModel {
 
     static async getVendorByPhone(phone) {
         const { rows } = await pool.query(
-            `SELECT u.*, v.*
+            `SELECT u.*, v.*, vs.*
             FROM users u
             JOIN vendors v ON v.user_id = u.id
+            JOIN vendor_settings vs ON vs.vendor_id = v.id
             WHERE u.phone = $1
-            AND u.role = $2
-            AND u.deleted_at IS NULL`,
+            AND u.role = $2`,
             [phone, ROLES.VENDOR]
         );
         return rows[0] ?? null;
@@ -95,12 +95,12 @@ class VendorModel {
 
     static async getVendorById(id) {
         const { rows } = await pool.query(
-            `SELECT u.*, v.*
+            `SELECT u.*, v.*, vs.*
             FROM users u
             JOIN vendors v ON v.user_id = u.id
-            WHERE u.id = $1
-            AND u.role = $2
-            AND u.deleted_at IS NULL`,
+            JOIN vendor_settings vs ON vs.vendor_id = v.id
+            WHERE v.id = $1
+            AND u.role = $2`,
             [id, ROLES.VENDOR]
         );
         return rows[0] ?? null;
@@ -116,7 +116,6 @@ class VendorModel {
             WHERE u.email = $1
             AND u.role = $2
             AND v.vendor_id = $3
-            AND u.deleted_at IS NULL
             LIMIT 1`,
             [email, ROLES.VENDOR_ADMIN, vendorId]
         );
@@ -133,7 +132,6 @@ class VendorModel {
             WHERE u.phone = $1
             AND u.role = $2
             AND v.vendor_id = $3
-            AND u.deleted_at IS NULL
             LIMIT 1`,
             [phone, ROLES.VENDOR_ADMIN, vendorId]
         );
@@ -150,7 +148,6 @@ class VendorModel {
             WHERE u.id = $1
             AND u.role = $2
             AND v.vendor_id = $3
-            AND u.deleted_at IS NULL
             LIMIT 1`,
             [id, ROLES.VENDOR_ADMIN, vendorId]
         );

@@ -1,97 +1,108 @@
-import { Activity } from "#models/activity.model.js";
+import { ActivityLog } from '#services/audit-logs.js';
 import ERROR_CODES from "#utils/error.codes.js";
 import { respondWithError, respondWithSuccess } from "#utils/response.js";
 
-export const fetchLogs = async (req, res) => {
-    try {
-        const { session, params, query, pagination } = req;
-        const user = session?.user;
-        const { offset, limit } = pagination;
-
-        const result = await Activity.fetchAllLogs(offset, limit);
-        if (result.length === 0) {
-            return respondWithError(res, 404, "No logs found", ERROR_CODES.RESOURCE_NOT_FOUND);
-        }
-
-        return respondWithSuccess(res, 200, "Logs retrieved successfully", result);
-        
-    } catch (error) {
-        console.error( error);
-        return respondWithError(res, 500, "Internal Server Error", ERROR_CODES.INTERNAL_SERVER_ERROR);
-    }
-}
-
-export const viewLog = async (req, res) => {
-    try {
-        const { session, params } = req;
-        const user = session?.user;
-        const id = parseInt(params.Id);
-
-        const result = await Activity.viewLog(id);
-        if (result.length === 0) {
-            return respondWithError(res, 404, "Log NOT found", ERROR_CODES.RESOURCE_NOT_FOUND);
-        }
-
-        return respondWithSuccess(res, 200, "Log data retrieved successfully", result);
-
-    } catch (error) {
-        console.error( error);
-        return respondWithError(res, 500, "Internal Server Error", ERROR_CODES.INTERNAL_SERVER_ERROR);
-    }
-}
-
 export const fetchUserLogs = async (req, res) => {
     try {
-        const { session, pagination } = req;
-        const user = session?.user;
-        const { offset, limit } = pagination;
-
-        const result = await Activity.getUserLogs(user.id, offset, limit);
-        if (result.length <= 0) {
-            return respondWithError(res, 404, "User logs NOT found", ERROR_CODES.RESOURCE_NOT_FOUND);
-        }
-
-        return respondWithSuccess(res, 200, "User logs retrieved successfully", result);
-
+        const { offset, limit } = req.pagination;
+        const result = await ActivityLog.listForUser(req.auth.userId, offset, limit);
+        console.log('activity:', result);
+        return respondWithSuccess(res, 200, 'Activity logs retrieved successfully', {
+            data: result.rows,
+            pagination: { offset, limit, total: result.total },
+        });
     } catch (error) {
-        console.error( error);
-        return respondWithError(res, 500, "Internal Server Error", ERROR_CODES.INTERNAL_SERVER_ERROR);
+        console.error('Unable to fetch user activity logs', { errorName: error?.name ?? 'Error' });
+        return respondWithError(res, 500, 'Unable to retrieve activity logs.', ERROR_CODES.INTERNAL_SERVER_ERROR);
     }
-}
+};
 
-export const searchLogs = async (req, res) => {
+export const fetchAdminLogs = async (req, res) => {
     try {
-        const { session, pagination } = req;
-        const user = session?.user;
-        const { offset, limit } = pagination;
-
-        const result = await Activity.searchActivities(user.id, query, offset, limit);
-        if (result.length <= 0) {
-            return respondWithError(res, 404, "User logs NOT found", ERROR_CODES.RESOURCE_NOT_FOUND);
+        const { offset, limit } = req.pagination;
+        const { source, user_id: userId, level, search } = req.query;
+        const allowedSources = new Set(['activity', 'system']);
+        const allowedLevels = new Set(['info', 'warn', 'error', 'fatal']);
+        if (source && !allowedSources.has(source)) {
+            return respondWithError(res, 400, 'Invalid log source.', ERROR_CODES.VALIDATION_ERROR);
+        }
+        if (level && !allowedLevels.has(level)) {
+            return respondWithError(res, 400, 'Invalid log level.', ERROR_CODES.VALIDATION_ERROR);
+        }
+        const parsedUserId = userId === undefined ? null : Number(userId);
+        if (parsedUserId !== null && (!Number.isSafeInteger(parsedUserId) || parsedUserId <= 0)) {
+            return respondWithError(res, 400, 'Invalid user_id filter.', ERROR_CODES.VALIDATION_ERROR);
         }
 
-        return respondWithSuccess(res, 200, "User logs retrieved successfully", result);
-
+        const result = await ActivityLog.listForAdmin({
+            offset,
+            limit,
+            source,
+            userId: parsedUserId,
+            level,
+            search: typeof search === 'string' ? search.trim().slice(0, 100) : null,
+        });
+        return respondWithSuccess(res, 200, 'Audit logs retrieved successfully', {
+            data: result.rows,
+            pagination: { offset, limit, total: result.total },
+        });
     } catch (error) {
-        console.error( error);
-        return respondWithError(res, 500, "Internal Server Error", ERROR_CODES.INTERNAL_SERVER_ERROR);
+        console.error('Unable to fetch admin audit logs', { errorName: error?.name ?? 'Error' });
+        return respondWithError(res, 500, 'Unable to retrieve audit logs.', ERROR_CODES.INTERNAL_SERVER_ERROR);
     }
-}
+};
 
-export const adminSearchLogs = async (req, res) => {
+export const fetchUserLogDetails = async (req, res) => {
     try {
-        const { session, pagination, query } = req;
-        const { offset, limit } = pagination;
-
-        const result = await Activity.searchActivities(query.user_id || null, query, offset, limit);
-        if (result.length === 0) {
-            return respondWithError(res, 404, "No logs found", ERROR_CODES.RESOURCE_NOT_FOUND);
+        const rawId = req.params.id;
+        const id = Number(rawId);
+        if (!/^[1-9]\d*$/.test(rawId) || !Number.isSafeInteger(id) || id > 2147483647) {
+            return respondWithError(res, 400, 'Invalid log ID.', ERROR_CODES.VALIDATION_ERROR);
         }
 
-        return respondWithSuccess(res, 200, "Logs retrieved successfully", result);
-
+        const log = await ActivityLog.getUserById(req.auth.userId, id);
+        if (!log) {
+            return respondWithError(res, 404, 'Log not found.', ERROR_CODES.RESOURCE_NOT_FOUND);
+        }
+        return respondWithSuccess(res, 200, 'Activity log retrieved successfully', log);
     } catch (error) {
-        console.error( error);
-        return respondWithError(res, 500, "Internal Server Error", ERROR_CODES.INTERNAL_SERVER_ERROR);
+        console.error('Unable to fetch user activity log', { errorName: error?.name ?? 'Error' });
+        return respondWithError(res, 500, 'Unable to retrieve activity log.', ERROR_CODES.INTERNAL_SERVER_ERROR);
     }
-}
+};
+
+export const fetchAdminLogDetails = async (req, res) => {
+    try {
+        const { source, id } = req.params;
+        if (!['activity', 'system'].includes(source)) {
+            return respondWithError(res, 400, 'Invalid log source.', ERROR_CODES.VALIDATION_ERROR);
+        }
+        // Keep BIGSERIAL system log IDs as strings so values beyond JS safe
+        // integer precision are passed to PostgreSQL without being rounded.
+        if (!/^[1-9]\d*$/.test(id)) {
+            return respondWithError(res, 400, 'Invalid log ID.', ERROR_CODES.VALIDATION_ERROR);
+        }
+        if (source === 'activity' && Number(id) > 2147483647) {
+            return respondWithError(res, 400, 'Invalid log ID.', ERROR_CODES.VALIDATION_ERROR);
+        }
+        if (source === 'system' && BigInt(id) > 9223372036854775807n) {
+            return respondWithError(res, 400, 'Invalid log ID.', ERROR_CODES.VALIDATION_ERROR);
+        }
+
+        const log = await ActivityLog.getAdminById(source, id);
+        if (!log) {
+            return respondWithError(res, 404, 'Log not found.', ERROR_CODES.RESOURCE_NOT_FOUND);
+        }
+        return respondWithSuccess(res, 200, 'Audit log retrieved successfully', log);
+    } catch (error) {
+        console.error('Unable to fetch admin audit log', { errorName: error?.name ?? 'Error' });
+        return respondWithError(res, 500, 'Unable to retrieve audit log.', ERROR_CODES.INTERNAL_SERVER_ERROR);
+    }
+};
+
+// Query form supports clients that use the same detail URL for either source:
+// GET /logs/:id?source=activity|system
+export const fetchAdminLogDetailById = async (req, res) => {
+    req.params.source = req.query.source;
+    return fetchAdminLogDetails(req, res);
+};

@@ -83,11 +83,11 @@ export const S3upload = async (file, filename) => {
         // Construct and return the S3 URL
         const s3Url = `https://${process.env.S3_BUCKET}.s3.${process.env.AWS_REGION}.amazonaws.com/${filename}`;
         
-        console.log(`Successfully uploaded file to S3: ${s3Url}`);
+        console.info('S3 upload completed');
         return { error: false, url: s3Url };
 
     } catch (err) {
-        console.error('Error uploading file to S3:', err);
+        console.error('S3 upload failed', { errorName: err?.name ?? 'Error', errorCode: err?.Code ?? err?.code ?? null });
         return { 
             error: true, 
             message: err.message || 'Unknown upload error'
@@ -103,10 +103,10 @@ export const S3delete = async (key) => {
 
     try {
         const deleteResponse = await s3Client.send(new DeleteObjectCommand(deleteParams));
-        console.log('File deleted successfully');
+        console.info('S3 object deletion completed');
         return { error: false };
     } catch (err) {
-        console.error('Error deleting file:', err);
+        console.error('S3 object deletion failed', { errorName: err?.name ?? 'Error', errorCode: err?.Code ?? err?.code ?? null });
         return { error: true, message: err.message };
     }
 }

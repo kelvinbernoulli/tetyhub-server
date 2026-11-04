@@ -3,6 +3,7 @@ import * as BookingController from '#controllers/booking.controller.js';
 import * as SettingsController from "#controllers/settings.controller.js";
 import * as SupportTicketController from "#controllers/support.ticket.controller.js";
 import * as ProductController from "#controllers/product.controller.js";
+import * as ShippingRatesController from '#controllers/shipping-rates.controller.js';
 import * as VendorController from "#controllers/vendor.controller.js";
 import * as ShipmentController from "#controllers/shipment.controller.js";
 import * as ReturnController from "#controllers/return.controller.js";
@@ -10,6 +11,7 @@ import * as PermissionsController from "#controllers/permission.controller.js";
 import * as PaymentController from "#controllers/payment.controller.js";
 import * as PayoutController from "#controllers/payout.controller.js";
 import * as AdminsController from "#controllers/admin.controller.js";
+import * as KYCController from '#controllers/kyc.controller.js';
 import * as TransactionHistoryController from "#controllers/transaction.history.controller.js";
 import * as AdminTypesController from "#controllers/admin.type.controller.js";
 import * as CouponsController from "#controllers/coupon.controller.js";
@@ -25,6 +27,7 @@ import {
     canDelete,
     canRead,
     canUpdate,
+    isVendor,
     isVendorAndVendorAdmin,
     requireCsrfProtection,
     requireRecentAuthentication,
@@ -47,6 +50,7 @@ router.get("/settings", canRead('settings'), pagination, SettingsController.fetc
 router.patch("/settings/update", canUpdate('settings'), VendorController.updateVendorSettings);
 
 //products
+router.get('/shipping-categories', canRead('products'), ShippingRatesController.getShipbubblePackageCategories);
 router.get("/products/search", canRead('products'), pagination, ProductController.searchVendorProducts);
 router.delete("/product/delete/:id", canDelete('products'), ProductController.deleteProduct);
 router.post("/product/create", canCreate('products'), ProductController.createProduct);
@@ -151,5 +155,10 @@ router.get('/promotions/:promotionId', canRead('promotions'), PromotionControlle
 router.post('/promotions/create', canCreate('promotions'), PromotionController.createPromotion);
 router.patch('/promotions/update/:promotionId', canUpdate('promotions'), PromotionController.updatePromotion);
 router.delete('/promotions/delete/:promotionId', canDelete('promotions'), PromotionController.deletePromotion);
+
+router.post('/kyc/identity', isVendor, KYCController.verifyIdentity);
+router.post('/kyc/business', isVendor, KYCController.verifyBusiness);
+router.post('/kyc/address', isVendor, KYCController.verifyAddress);
+router.get('/kyc/address/status', isVendor, KYCController.fetchAddressVerificationStatus);
 
 export default router;

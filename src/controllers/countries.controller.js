@@ -13,16 +13,12 @@ export const createCountry = async (req, res) => {
             return respondWithError(res, 400, error.details[0].message, ERROR_CODES.VALIDATION_ERROR);
         }
 
-        const { name, country_code, dial_code, flag } = body;
+        const { name, code } = body;
 
-        const duplicates = await duplicate_check_by_columns('countries', ['name', 'country_code', 'dial_code'], [name, country_code, dial_code]);
+        const duplicates = await duplicate_check_by_columns('countries', ['name', 'code'], [name, code]);
         if (duplicates.length > 0) {
             return respondWithError(res, 409, 'Country with the same name, code, or dial code already exists', ERROR_CODES.DUPLICATE_RESOURCE);
         }
-
-        const filename = `images/country-flags/${name}.${getBase64Extension(flag)}`;
-        await S3upload(req, res, filename, flag);
-        body.flag = filename;
 
         const keys = Object.keys(body);
         const values = Object.values(body);
@@ -49,23 +45,16 @@ export const updateCountry = async (req, res) => {
         if (error) {
             return respondWithError(res, 400, error.details[0].message, ERROR_CODES.VALIDATION_ERROR);
         }
-        const { name, country_code, dial_code, flag } = body;
+        const { name, code } = body;
 
         const existingCountry = await fetch_one_by_key('countries', 'id', countryId);
         if (existingCountry.rowCount === 0) {
             return respondWithError(res, 404, 'Country not found', ERROR_CODES.RESOURCE_NOT_FOUND);
         }
 
-        const duplicates = await duplicate_check_by_columns('countries', ['name', 'country_code', 'dial_code'], [name, country_code, dial_code]);
+        const duplicates = await duplicate_check_by_columns('countries', ['name', 'code'], [name, code]);
         if (duplicates.length > 0) {
             return respondWithError(res, 409, 'Another country with the same name, code, or dial code already exists', ERROR_CODES.DUPLICATE_RESOURCE);
-        }
-
-        if (flag) {
-            const filename = `images/country-flags/${name}.${getBase64Extension(flag)}`;
-            await S3upload(req, res, filename, flag);
-            await S3delete(existingCountry.rows[0].flag);
-            body.flag = filename;
         }
 
         const result = await update_by_id('countries', countryId, body);

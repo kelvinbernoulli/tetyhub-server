@@ -20,15 +20,15 @@ import web from '#routes/web.routes.js';
 import {
     paystackWebhook,
     stripeWebhook,
-    startPaystackWebhookWorker,
+    shipBubbleWebhook,
 } from '#services/webhook.js';
-import { startCheckoutWorker } from '#services/checkout.worker.js';
-import { startSubscriptionLifecycleJob } from '#services/subscription-lifecycle.service.js';
+import { startShipbubbleLabelWorker } from '#services/shipbubble-label.worker.js';
 import passport from 'passport';
 import pool from '#services/pg_pool.js';
 import redisClient from '#config/redis.js';
 import { createRedisRateLimiter } from '#middlewares/auth-rate-limit.middleware.js';
 import sessionMiddleware from '#config/session.js';
+import { auditLogging } from '#middlewares/audit-logging.middleware.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -103,6 +103,11 @@ app.post(
     express.raw({ type: 'application/json', limit: '1mb' }),
     stripeWebhook
 );
+app.post(
+    '/v1/api/webhook/shipbubble',
+    express.json({ limit: '1mb' }),
+    shipBubbleWebhook
+);
 
 // Parsing
 app.use(cookieParser());
@@ -110,6 +115,7 @@ app.use(sessionMiddleware);
 app.use(express.json({ limit: REQUEST_SIZE_LIMIT }));
 app.use(express.urlencoded({ limit: REQUEST_SIZE_LIMIT, extended: true }));
 app.use(passport.initialize());
+app.use(auditLogging);
 
 // Static assets
 app.use('/assets', express.static(path.join(__dirname, 'assets')));
@@ -142,7 +148,8 @@ app.use((req, res) => {
     res.status(404).json({
         success: false,
         message: 'Route not found',
-        path: req.originalUrl,
+        // Avoid echoing query parameters, which may contain webhook secrets.
+        path: req.path,
     });
 });
 
@@ -169,10 +176,10 @@ app.use((err, req, res, next) => {
     });
 });
 
-// Startup
 // const stopCheckoutWorker = startCheckoutWorker();
 // const stopPaystackWebhookWorker = startPaystackWebhookWorker();
 // const stopSubscriptionLifecycleJob = startSubscriptionLifecycleJob();
+const stopShipbubbleLabelWorker = startShipbubbleLabelWorker();
 
 const server = app.listen(PORT, () => {
     console.log(`Server running on port ${PORT} — http://localhost:${PORT}/`);
@@ -183,9 +190,7 @@ const shutdown = (signal) => {
     if (shuttingDown) return;
     shuttingDown = true;
     console.log(`${signal} received: closing server and background workers`);
-    stopCheckoutWorker();
-    stopPaystackWebhookWorker();
-    stopSubscriptionLifecycleJob();
+    stopShipbubbleLabelWorker();
 
     const forceExit = setTimeout(() => {
         console.error('Graceful shutdown timed out.');

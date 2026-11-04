@@ -10,4 +10,3 @@ export const subscriptionCheckoutSchema = Joi.object({
 export const subscriptionDowngradeSchema = Joi.object({
     plan: Joi.string().valid('FREE', 'PRO', 'BUSINESS').required(),
 }).unknown(false);
-

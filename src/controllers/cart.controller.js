@@ -187,15 +187,35 @@ export const removeFromCart = async (req, res) => {
 export const previewCheckout = async (req, res) => {
     try {
         const { session, query } = req;
+        console.log('Preview checkout request query:', query);
         const user = session?.user;
 
         const { coupon_code } = query;
+        const shippingQuoteIds = query.shipping_quote_ids
+            ? String(query.shipping_quote_ids).split(',')
+            : [];
+        if (
+            shippingQuoteIds.some(
+                (id) =>
+                    !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+                        id
+                    )
+            )
+        )
+            return respondWithError(
+                res,
+                400,
+                'Invalid ShipBubble quote ID',
+                ERROR_CODES.VALIDATION_ERROR
+            );
 
         const result = await Cart.previewCheckout(
             user.id,
             coupon_code,
-            query.country
+            query.country,
+            shippingQuoteIds
         );
+        console.log('Preview checkout result:', result);
         if (result?.error) {
             return respondWithError(
                 res,

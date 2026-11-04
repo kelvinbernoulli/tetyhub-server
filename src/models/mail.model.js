@@ -106,6 +106,20 @@ export const sendOrderStatusEmail = async (user, order, vendor) => {
     }
 };
 
+export const sendKYCSubmissionEmail = async (user, type) => {
+    try {
+        await transporter.sendMail({
+            from: process.env.EMAIL_USER,
+            to: user.email,
+            subject: 'KYC submission received',
+            text: 'We received your ' + type.toLowerCase() + ' verification submission. We will notify you when it has been reviewed.',
+        });
+        return true;
+    } catch (error) {
+        console.error('KYC submission email failed', { errorCode: error?.code ?? null });
+        return false;
+    }
+};
 export const sendSubscriptionRenewalEmail = async (user, subscription) => {
     try {
         await transporter.sendMail({

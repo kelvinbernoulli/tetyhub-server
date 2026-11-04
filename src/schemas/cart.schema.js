@@ -41,8 +41,9 @@ export const upsertCartSchema = Joi.object({
 });
 
 export const checkoutSchema = Joi.object({
-    expected_total: Joi.number().precision(2).positive().required().label('Total'),
+    expected_total: Joi.number().positive().required().label('Total'),
     expected_currency: Joi.string().length(3).uppercase().default('NGN').required().label('Currency'),
+    shipping_quote_ids: Joi.array().items(Joi.string().guid({ version: 'uuidv4' })).min(1).optional(),
     gateway: Joi.string().valid('paystack', 'stripe').default('paystack').required(),
     // idempotency_key: Joi.string().guid({ version: 'uuidv4' }).required(),
     firstname: Joi.string().trim().max(100).required().label('First Name'),

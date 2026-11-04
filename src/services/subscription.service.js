@@ -161,9 +161,10 @@ export class SubscriptionService {
             const { rows } = await client.query(
                 `INSERT INTO subscriptions
                     (provider_id, plan, plan_version, status,
-                     current_period_start, current_period_end, trial_used)
+                     current_period_start, current_period_end, trial_used,
+                     updated_at)
                  VALUES ($1, 'PRO', $2, 'trialing', NOW(),
-                         NOW() + INTERVAL '14 days', TRUE)
+                         NOW() + INTERVAL '14 days', TRUE, NOW())
                  ON CONFLICT (provider_id) DO UPDATE SET
                     plan = 'PRO', plan_version = EXCLUDED.plan_version,
                     status = 'trialing', current_period_start = NOW(),
@@ -630,8 +631,9 @@ export class SubscriptionService {
                     (provider_id, plan, plan_version, status,
                      current_period_start, current_period_end, trial_used,
                      paystack_customer_code, cancel_at_period_end,
-                     pending_plan, pending_plan_version, grace_ends_at)
-                 VALUES ($1, $2, $3, 'active', $4, $5, $6, $7, FALSE, NULL, NULL, NULL)
+                     pending_plan, pending_plan_version, grace_ends_at,
+                     updated_at)
+                 VALUES ($1, $2, $3, 'active', $4, $5, $6, $7, FALSE, NULL, NULL, NULL, NOW())
                  ON CONFLICT (provider_id) DO UPDATE SET
                     plan = EXCLUDED.plan, plan_version = EXCLUDED.plan_version,
                     status = 'active', current_period_start = $4,

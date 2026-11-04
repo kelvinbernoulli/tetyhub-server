@@ -12,7 +12,7 @@ export class Activity {
             console.log('Activity logged:', action);
             return rows[0];
         } catch (error) {
-            console.error('Error logging activity:', error);
+            console.error('Activity log write failed', { errorName: error?.name ?? 'Error', errorCode: error?.code ?? null });
             throw error;
         }
     }
@@ -28,7 +28,7 @@ export class Activity {
             );
             return rows;
         } catch (error) {
-            console.error(error);
+            console.error('Activity log query failed', { errorName: error?.name ?? 'Error', errorCode: error?.code ?? null });
             throw error;
         }
     }
@@ -48,7 +48,7 @@ export class Activity {
             );
             return rows;
         } catch (error) {
-            console.error(error);
+            console.error('Activity log query failed', { errorName: error?.name ?? 'Error', errorCode: error?.code ?? null });
             throw error;
         }
     }
@@ -62,7 +62,7 @@ export class Activity {
             );
             return rows;
         } catch (error) {
-            console.error(error);
+            console.error('Activity log query failed', { errorName: error?.name ?? 'Error', errorCode: error?.code ?? null });
             throw error;
         }
     }
@@ -78,7 +78,7 @@ export class Activity {
             );
             return rows;
         } catch (error) {
-            console.error(error);
+            console.error('Activity log query failed', { errorName: error?.name ?? 'Error', errorCode: error?.code ?? null });
             throw error;
         }
 

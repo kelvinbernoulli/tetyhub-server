@@ -9,6 +9,9 @@ import * as PermissionsController from "#controllers/permission.controller.js";
 import * as TransactionHistoryController from "#controllers/transaction.history.controller.js";
 import * as CommissionController from "#controllers/commission.controller.js";
 import * as SubscriptionPlansController from "#controllers/subscription-plans.controller.js";
+import * as KYCController from '#controllers/kyc.controller.js';
+import * as ActivityController from '#controllers/activity.controller.js';
+import * as ShipbubbleLabelController from '#controllers/shipbubble-label.controller.js';
 import * as ReturnController from "#controllers/return.controller.js";
 import * as CategoriesController from '#controllers/categories.controller.js'
 import * as SubcategoriesController from '#controllers/subcategories.controller.js'
@@ -104,6 +107,14 @@ router.get("/permissions/:adminId", canRead('admins'), PermissionsController.fet
 //transactions
 router.get("/transactions", canRead('transactions'), pagination, TransactionHistoryController.getAllTransactions);
 
+// ShipBubble label booking failures on paid orders
+router.get(
+    "/shipbubble/label-issues",
+    canRead('orders'),
+    pagination,
+    ShipbubbleLabelController.getLabelBookingIssues
+);
+
 //returns
 router.get("/returns", canRead('returns'), pagination, ReturnController.getAllReturns);
 router.patch("/returns/:returnId", canUpdate('returns'), ReturnController.adminUpdateReturn);
@@ -120,5 +131,15 @@ router.get('/reviews', canRead('reviews'), ReviewController.fetchAdminReviews);
 router.get('/reviews/:reviewId', canRead('reviews'), ReviewController.viewAdminReview);
 router.patch('/reviews/:reviewId/status', canRead('reviews'), canUpdate('reviews'), ReviewController.moderateReview);
 router.delete('/reviews/:reviewId', canRead('reviews'), canDelete('reviews'), ReviewController.deleteAdminReview);
+
+// KYC records contain government identifiers and verification documents.
+router.get('/kyc', isSuperAdmin, requireRecentAuthentication(), pagination, KYCController.fetchKYCSubmissions);
+router.get('/kyc/:id', isSuperAdmin, requireRecentAuthentication(), KYCController.viewKYCSubmission);
+router.patch('/kyc/status', isSuperAdmin, requireRecentAuthentication(), KYCController.updateKycStatus);
+
+// Audit logs can expose account and operational details; keep access restricted.
+router.get('/logs', isSuperAdmin, requireRecentAuthentication(), pagination, ActivityController.fetchAdminLogs);
+router.get('/logs/:id', isSuperAdmin, requireRecentAuthentication(), ActivityController.fetchAdminLogDetailById);
+router.get('/logs/:source/:id', isSuperAdmin, requireRecentAuthentication(), ActivityController.fetchAdminLogDetails);
 
 export default router;

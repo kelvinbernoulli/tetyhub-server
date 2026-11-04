@@ -126,6 +126,12 @@ model users {
   service_bookings            service_bookings[]
   vendorSettings              vendor_settings?
   serviceBookmarks            service_bookmarks[]
+  shipbubble_rate_quotes      shipbubble_rate_quotes[]
+
+  kyc_identity kyc_identity?
+  kyc_business kyc_business?
+  kyc_address  kyc_address?
+  kyc_id_fingerprints kyc_id_fingerprints[]
 
   @@index([country_id])
 }
@@ -155,6 +161,7 @@ model users_info {
 
 model vendors {
   shipments           shipments[]
+  shipbubble_rate_quotes shipbubble_rate_quotes[]
   order_fulfillments  vendor_order_fulfillments[]
   ledger_entries      ledger_entries[]
   subscription        Subscription?
@@ -359,6 +366,7 @@ model products {
   length              Float?
   width               Float?
   height              Float?
+  shipbubble_category_id Int?
   free_shipping       Boolean   @default(false)
   status              String    @default("draft") // draft, active, archived
   is_featured         Boolean   @default(false)
@@ -424,6 +432,9 @@ model product_variants {
   image               String?
   weight              Float?
   dimensions          String?
+  length              Float?
+  width               Float?
+  height              Float?
   status              String    @default("active")
   created_at          DateTime  @default(now())
   updated_at          DateTime? @updatedAt
@@ -590,6 +601,7 @@ model orders {
   coupon_usage          coupon_usage?
   status_history        order_status_history[]
   checkout_notification checkout_notifications?
+  shipbubble_rate_quotes shipbubble_rate_quotes[]
 
   @@unique([user_id, checkout_key])
   @@index([user_id, status])
@@ -708,6 +720,7 @@ model order_items {
   product_id     Int?      @map("product_id") // Nullable if the line is a service
   service_id     Int?      @map("service_id") // Nullable if the line is a product
   variant_id     Int?      @map("variant_id") // Nullable if no product variant exists
+  shipbubble_category_id Int? @map("shipbubble_category_id")
   vendor_id      Int       @map("vendor_id")
   quantity       Int
   stock_reserved Boolean   @default(false)
@@ -828,8 +841,13 @@ model shipments {
   id                 Int       @id @default(autoincrement())
   order_id           Int
   vendor_id          Int?
+  shipping_group_key String?
+  shipbubble_category_id Int?
   vendor             vendors?  @relation(fields: [vendor_id], references: [id])
   tracking_number    String?
+  shipbubble_order_id String?   @unique
+  tracking_url       String?
+  waybill_document   String?
   carrier            String?
   shipping_method    String?
   estimated_delivery DateTime?
@@ -844,16 +862,56 @@ model shipments {
   order            orders                      @relation(fields: [order_id], references: [id], onDelete: Cascade)
   tracking_history shipment_tracking_history[]
 
-  @@unique([order_id, vendor_id])
+  @@index([order_id, vendor_id, shipping_group_key])
   @@index([vendor_id])
 }
 
+model shipbubble_rate_quotes {
+  id             String   @id @db.Uuid
+  user_id        Int
+  vendor_id      Int
+  order_id       Int?
+  package_group_key String?
+  request_token  String
+  courier_id     String
+  service_code   String
+  courier_name   String
+  amount         Decimal  @db.Decimal(10, 2)
+  currency       String
+  quote_data     Json
+  booking_status String   @default("unpaid") // unpaid, pending, processing, completed, failed, needs_review
+  booking_attempts Int    @default(0)
+  processing_until DateTime? @db.Timestamp(3)
+  booking_error String?
+  booked_at      DateTime? @db.Timestamp(3)
+  expires_at     DateTime @db.Timestamp(3)
+  created_at     DateTime @default(now()) @db.Timestamp(3)
+
+  user   users   @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  vendor vendors @relation(fields: [vendor_id], references: [id], onDelete: Cascade)
+  order  orders? @relation(fields: [order_id], references: [id], onDelete: SetNull)
+
+  @@index([user_id, expires_at])
+  @@index([order_id])
+  @@index([booking_status, processing_until, order_id])
+  @@map("shipbubble_rate_quotes")
+}
+
+model shipbubble_validated_addresses {
+  address_hash String   @id
+  address_code BigInt
+  address_data Json
+  updated_at   DateTime @default(now()) @db.Timestamp(3)
+
+  @@map("shipbubble_validated_addresses")
+}
+
 model shipment_tracking_history {
-  changed_by  Int?
   id          Int       @id @default(autoincrement())
   shipment_id Int
   status      String
   location    String?
+  changed_by  Int?
   description String?
   created_at  DateTime  @default(now())
   updated_at  DateTime? @updatedAt
@@ -1023,6 +1081,25 @@ model activity_logs {
 
   // Relations
   user users @relation(fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+model system_logs {
+  id          BigInt   @id @default(autoincrement())
+  level       String   @default("error")
+  event       String
+  message     String?
+  details     Json     @default("{}") @db.JsonB
+  user_id     Int?
+  request_id  String?
+  method      String?
+  path        String?
+  status_code Int?
+  created_at  DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([created_at])
+  @@index([level, created_at])
+  @@index([user_id, created_at])
+  @@map("system_logs")
 }
 
 // ===============================================
@@ -1267,7 +1344,7 @@ model Subscription {
   paystackSubscriptionCode String?            @map("paystack_subscription_code")
   paystackEmailToken       String?            @map("paystack_email_token")
   createdAt                DateTime           @default(now()) @map("created_at")
-  updatedAt                DateTime           @updatedAt @map("updated_at")
+  updatedAt                DateTime            @default(now()) @updatedAt @map("updated_at")
 
   provider          vendors             @relation(fields: [providerId], references: [id], onDelete: Cascade)
   planDefinition    PlanVersion?        @relation("SubscriptionCurrentPlan", fields: [plan, planVersion], references: [plan, version], onDelete: Restrict)
@@ -1449,4 +1526,98 @@ model faq {
   status     Boolean   @default(true)
   created_at DateTime  @default(now())
   updated_at DateTime?
+}
+model kyc_identity {
+  id                  Int      @id @default(autoincrement())
+  user_id             Int      @unique
+  id_type             Json     @default("{}") @db.JsonB
+  id_number           Json     @default("{}") @db.JsonB
+  id_document         String?
+  country             String   @db.VarChar(2)
+  document_number     Json     @default("{}") @db.JsonB
+  verification_status Json     @default("{}") @db.JsonB
+  selfie              String
+  verification_data   Json     @db.JsonB
+  review_reasons      Json     @default("{}") @db.JsonB
+  created_at          DateTime @default(now()) @db.Timestamp(3)
+  updated_at          DateTime @default(now()) @db.Timestamp(3)
+
+  user users @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("kyc_identity")
+}
+
+model kyc_identity_evidence {
+  id         Int      @id @default(autoincrement())
+  user_id    Int
+  id_type    String   @db.VarChar(3)
+  selfie     String
+  id_document String?
+  country    String   @db.VarChar(2)
+  created_at DateTime @default(now()) @db.Timestamp(3)
+  updated_at DateTime @default(now()) @db.Timestamp(3)
+
+  @@unique([user_id, id_type])
+  @@index([user_id])
+  @@map("kyc_identity_evidence")
+}
+
+model kyc_business {
+  id                  Int      @id @default(autoincrement())
+  user_id             Int      @unique
+  business_name       String
+  registration_number String
+  business_document   String
+  business_address    String
+  verification_status String   @default("pending")
+  verification_data   Json     @db.JsonB
+  review_reason       String?
+  created_at          DateTime @default(now()) @db.Timestamp(3)
+  updated_at          DateTime @default(now()) @db.Timestamp(3)
+
+  user users @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("kyc_business")
+}
+
+model kyc_address {
+  id                          Int      @id @default(autoincrement())
+  user_id                     Int      @unique
+  address_line1               String
+  address_line2               String?
+  house_number                String?
+  landmark                    String?
+  city                        String
+  state                       String
+  lga                         String
+  street                      String
+  address_verification_due_date DateTime? @db.Timestamp(3)
+  verification_type           String
+  country                     String
+  verification_data           Json     @db.JsonB
+  review_status               String   @default("pending")
+  review_reason               String?
+  provider_job_id             String?
+  provider_status             String   @default("pending")
+  provider_checked_at         DateTime? @db.Timestamp(3)
+  created_at                  DateTime @default(now()) @db.Timestamp(3)
+  updated_at                  DateTime @default(now()) @db.Timestamp(3)
+
+  user users @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("kyc_address")
+}
+
+model kyc_id_fingerprints {
+  id_type     String   @db.VarChar(3)
+  fingerprint String   @db.Char(64)
+  user_id     Int
+  created_at  DateTime @default(now()) @db.Timestamp(3)
+
+  user users @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@id([id_type, fingerprint])
+  @@unique([user_id, id_type])
+  @@index([user_id])
+  @@map("kyc_id_fingerprints")
 }

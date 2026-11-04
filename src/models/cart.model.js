@@ -322,6 +322,7 @@ export class Cart {
                     json_agg(jsonb_build_object(
                         'id', ci.id,
                         'product_id', ci.product_id,
+                        'vendor_id', p.vendor_id,
                         'product_name', p.name,
                         'thumbnail', p.thumbnail,
                         'variant_id', ci.variant_id,
@@ -356,6 +357,7 @@ export class Cart {
                     json_agg(jsonb_build_object(
                         'id', ci.id,
                         'product_id', ci.product_id,
+                        'vendor_id', p.vendor_id,
                         'product_name', p.name,
                         'thumbnail', p.thumbnail,
                         'variant_id', ci.variant_id,
@@ -459,11 +461,17 @@ export class Cart {
         }
     }
 
-    static async previewCheckout(userId, couponCode = null, country = null) {
+    static async previewCheckout(
+        userId,
+        couponCode = null,
+        country = null,
+        shippingQuoteIds = []
+    ) {
         try {
             return await quote(pool, userId, {
                 coupon_code: couponCode,
                 country,
+                shipping_quote_ids: shippingQuoteIds,
             });
         } catch (error) {
             if (error instanceof CheckoutError)

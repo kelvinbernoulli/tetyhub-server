@@ -60,10 +60,22 @@ const variantSchema = Joi.object({
     stock: Joi.number().integer().min(0).max(MAX_INT).required(),
     low_stock_threshold: Joi.number().integer().min(0).max(MAX_INT),
     weight: Joi.number().positive().allow(null),
+    length: Joi.number().positive().max(500).allow(null),
+    width: Joi.number().positive().max(500).allow(null),
+    height: Joi.number().positive().max(500).allow(null),
     image: imageSchema.allow(null),
 })
     .unknown(false)
-    .custom(validatePrices);
+    .custom((value, helpers) => {
+        const priceValidation = validatePrices(value, helpers);
+        if (priceValidation !== value) return priceValidation;
+        const dimensionCount = ['length', 'width', 'height'].filter(
+            (side) => value[side] != null
+        ).length;
+        if (dimensionCount !== 0 && dimensionCount !== 3)
+            return helpers.message('Variant dimensions must include length, width, and height');
+        return value;
+    });
 
 const optionValues = Joi.array()
     .items(Joi.number().integer().positive().max(MAX_INT))
@@ -240,9 +252,15 @@ export const createProductSchema = Joi.object({
 
     // Shipping
     weight: Joi.number().positive().optional().label('Weight (kg)'),
-    length: Joi.number().positive().optional().label('Length (cm)'),
-    width: Joi.number().positive().optional().label('Width (cm)'),
-    height: Joi.number().positive().optional().label('Height (cm)'),
+    length: Joi.number().positive().max(500).optional().label('Length (cm)'),
+    width: Joi.number().positive().max(500).optional().label('Width (cm)'),
+    height: Joi.number().positive().max(500).optional().label('Height (cm)'),
+    shipbubble_category_id: Joi.number()
+        .integer()
+        .positive()
+        .max(MAX_INT)
+        .optional()
+        .label('Shipbubble Category ID'),
     free_shipping: Joi.boolean().default(false).label('Free Shipping'),
 
     // Status
@@ -263,7 +281,28 @@ export const createProductSchema = Joi.object({
 })
     .unknown(false)
     .required()
-    .custom(validatePrices)
+    .custom((value, helpers) => {
+        const priceValidation = validatePrices(value, helpers);
+        if (priceValidation !== value) return priceValidation;
+        if (!value.is_digital) {
+            const variants = value.has_variants ? value.variants ?? [] : [];
+            const hasCompleteShippingData = (variant = {}) => {
+                const weight = variant.weight ?? value.weight;
+                const dimensions = ['length', 'width', 'height'].map(
+                    (side) => variant[side] ?? value[side]
+                );
+                return Number.isFinite(Number(weight)) && Number(weight) > 0 &&
+                    dimensions.every((side) => Number.isFinite(Number(side)) && Number(side) > 0);
+            };
+            if (!value.shipbubble_category_id)
+                return helpers.message('Shipbubble Category ID is required for shippable products');
+            if (!variants.length && !hasCompleteShippingData())
+                return helpers.message('Weight and all three dimensions are required for shippable products');
+            if (variants.some((variant) => !hasCompleteShippingData(variant)))
+                return helpers.message('Weight and dimensions are required for every shippable variant');
+        }
+        return value;
+    })
     .prefs({ abortEarly: false });
 
 export const updateProductSchema = Joi.object({
@@ -384,11 +423,18 @@ export const updateProductSchema = Joi.object({
 
     weight: Joi.number().min(0).allow(null).optional().label('Weight (kg)'),
 
-    length: Joi.number().min(0).allow(null).optional().label('Length (cm)'),
+    length: Joi.number().min(0).max(500).allow(null).optional().label('Length (cm)'),
 
-    width: Joi.number().min(0).allow(null).optional().label('Width (cm)'),
+    width: Joi.number().min(0).max(500).allow(null).optional().label('Width (cm)'),
 
-    height: Joi.number().min(0).allow(null).optional().label('Height (cm)'),
+    height: Joi.number().min(0).max(500).allow(null).optional().label('Height (cm)'),
+
+    shipbubble_category_id: Joi.number()
+        .integer()
+        .positive()
+        .max(MAX_INT)
+        .optional()
+        .label('Shipbubble Category ID'),
 
     free_shipping: Joi.boolean().optional().label('Free Shipping'),
 
