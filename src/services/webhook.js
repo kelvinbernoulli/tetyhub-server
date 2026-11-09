@@ -222,7 +222,7 @@ export async function shipBubbleWebhook(req, res) {
     });
     const secret = process.env.SHIPBUBBLE_WEBHOOK_SECRET;
     const suppliedSecret =
-        req.headers['x-shipbubble-secret'] ??
+        req.headers['x-ship-signature'] ??
         (typeof req.headers.authorization === 'string' &&
         req.headers.authorization.startsWith('Bearer ')
             ? req.headers.authorization.slice(7)

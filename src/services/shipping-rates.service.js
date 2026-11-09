@@ -61,34 +61,45 @@ async function validatedAddress(address) {
     return saved.rows[0];
 }
 
-async function requestRatesWithFreshSenderOnInvalidCode(
+async function requestRatesWithFreshAddressOnInvalidCode(
     request,
     sender,
-    senderAddress
+    senderAddress,
+    receiver,
+    receiverAddress
 ) {
     try {
         return await Shipbubble.requestRates({
             ...request,
             sender_address_code: Number(senderAddress.address_code),
+            reciever_address_code: Number(receiverAddress.address_code),
         });
     } catch (error) {
-        if (
-            error?.status !== 422 ||
-            !/invalid sender address code/i.test(error.message || '')
-        ) {
-            throw error;
-        }
+        const invalidCode = error?.status === 422
+            ? String(error.message || '').match(
+                  /invalid\s+(sender|reciever|receiver)\s+address code/i
+              )
+            : null;
+        if (!invalidCode) throw error;
 
-        const hash = addressKey(sender);
+        const isSender = invalidCode[1].toLowerCase() === 'sender';
+        const invalidAddress = isSender ? sender : receiver;
+        const staleAddress = isSender ? senderAddress : receiverAddress;
+        const codeField = isSender
+            ? 'sender_address_code'
+            : 'reciever_address_code';
+        const hash = addressKey(invalidAddress);
         await pool.query(
             `DELETE FROM shipbubble_validated_addresses
              WHERE address_hash = $1 AND address_code = $2`,
-            [hash, senderAddress.address_code]
+            [hash, staleAddress.address_code]
         );
-        const refreshedSenderAddress = await validatedAddress(sender);
+        const freshAddress = await validatedAddress(invalidAddress);
         return Shipbubble.requestRates({
             ...request,
-            sender_address_code: Number(refreshedSenderAddress.address_code),
+            sender_address_code: Number(senderAddress.address_code),
+            reciever_address_code: Number(receiverAddress.address_code),
+            [codeField]: Number(freshAddress.address_code),
         });
     }
 }
@@ -264,7 +275,7 @@ export async function requestVendorShippingRates(userId, vendorId, data) {
                 shipbubble_category_id: group.category_id,
             };
         });
-        const response = await requestRatesWithFreshSenderOnInvalidCode({
+        const response = await requestRatesWithFreshAddressOnInvalidCode({
             reciever_address_code: Number(receiverAddress.address_code),
             pickup_date: pickupDate,
             category_id: group.category_id,
@@ -272,7 +283,7 @@ export async function requestVendorShippingRates(userId, vendorId, data) {
             package_dimension: parcel.package_dimension,
             service_type: data.service_type,
             delivery_instructions: data.delivery_instructions,
-        }, sender, senderAddress);
+        }, sender, senderAddress, receiver, receiverAddress);
         const requestToken = response?.data?.request_token;
         const couriers = response?.data?.couriers;
         if (!requestToken || !Array.isArray(couriers) || !couriers.length)
