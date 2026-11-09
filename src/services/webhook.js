@@ -215,14 +215,18 @@ export async function stripeWebhook(req, res) {
 }
 
 export async function shipBubbleWebhook(req, res) {
+    console.log('Received ShipBubble webhook:', {
+        headers: req.headers,
+        body: req.body,
+        query: req.query,
+    });
     const secret = process.env.SHIPBUBBLE_WEBHOOK_SECRET;
     const suppliedSecret =
         req.headers['x-shipbubble-secret'] ??
         (typeof req.headers.authorization === 'string' &&
         req.headers.authorization.startsWith('Bearer ')
             ? req.headers.authorization.slice(7)
-            : null) ??
-        req.query?.secret;
+            : null);
     if (
         !secret ||
         typeof suppliedSecret !== 'string' ||
@@ -277,17 +281,6 @@ export async function shipBubbleWebhook(req, res) {
         const trackingUrl = payload.courier?.tracking_url ?? payload.tracking_url;
         const waybillDocument = payload.waybill_document ?? payload.waybill_url;
         const courierName = payload.courier?.name ?? payload.courier?.courier_name;
-        if (trackingCode || trackingUrl || waybillDocument || courierName) {
-            await pool.query(
-                `UPDATE shipments SET
-                    tracking_number = COALESCE($1, tracking_number),
-                    tracking_url = COALESCE($2, tracking_url),
-                    waybill_document = COALESCE($3, waybill_document),
-                    carrier = COALESCE($4, carrier), updated_at = NOW()
-                 WHERE id = $5`,
-                [trackingCode ?? null, trackingUrl ?? null, waybillDocument ?? null, courierName ?? null, shipment.id]
-            );
-        }
         const events = Array.isArray(payload.events) ? payload.events : [];
         const lastEvent = events.at(-1);
         const trackingDescription =
@@ -297,6 +290,10 @@ export async function shipBubbleWebhook(req, res) {
             `ShipBubble status: ${providerStatus}`;
         const update = {
             status: nextStatus,
+            tracking_number: trackingCode ?? undefined,
+            tracking_url: trackingUrl ?? undefined,
+            waybill_document: waybillDocument ?? undefined,
+            carrier: courierName ?? undefined,
             location:
                 typeof lastEvent?.location === 'string'
                     ? lastEvent.location.slice(0, 200)
@@ -318,13 +315,12 @@ export async function shipBubbleWebhook(req, res) {
             (nextStatus === 'cancelled' &&
                 !['pending', 'processing', 'failed'].includes(shipment.status));
         if (shipment.status === nextStatus || staleStatus) {
+            const trackingOnlyUpdate = { ...update };
+            delete trackingOnlyUpdate.status;
             await Shipment.updateShipment(
                 shipment.id,
                 shipment.vendor_id,
-                {
-                    location: update.location,
-                    tracking_description: update.tracking_description,
-                },
+                trackingOnlyUpdate,
                 null,
                 true,
                 true

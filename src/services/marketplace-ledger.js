@@ -1,6 +1,6 @@
 export async function recordProductSale(client, orderId) {
     await client.query(
-        `INSERT INTO marketplace_ledger_entries
+        `INSERT INTO ledger_entries
          (vendor_id, order_id, fulfillment_id, entry_type, amount, currency_id, idempotency_key)
          SELECT vendor_id, order_id, id, 'vendor_sale_credit', net_amount, o.currency_id,
                 'product:' || order_id || ':' || id || ':vendor-credit'
@@ -11,7 +11,7 @@ export async function recordProductSale(client, orderId) {
         [orderId]
     );
     await client.query(
-        `INSERT INTO marketplace_ledger_entries
+        `INSERT INTO ledger_entries
          (vendor_id, order_id, fulfillment_id, entry_type, amount, currency_id, idempotency_key)
          SELECT NULL, order_id, id, 'platform_commission', commission_amount, o.currency_id,
                 'product:' || order_id || ':' || id || ':platform-commission'

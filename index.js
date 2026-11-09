@@ -1,7 +1,5 @@
-import { config } from 'dotenv';
-config();
-
-process.env.TZ = 'UTC';
+// Load and validate runtime configuration before any application modules run.
+import './src/config/bootstrap.js';
 
 import express from 'express';
 import cors from 'cors';
@@ -22,8 +20,12 @@ import {
     paystackWebhook,
     stripeWebhook,
     shipBubbleWebhook,
+    startPaystackWebhookWorker,
 } from '#services/webhook.js';
 import { startShipbubbleLabelWorker } from '#services/shipbubble-label.worker.js';
+import { startShipbubbleTrackingWorker } from '#services/shipbubble-tracking.worker.js';
+import { startCheckoutWorker } from '#services/checkout.worker.js';
+import { startSubscriptionLifecycleJob } from '#services/subscription-lifecycle.service.js';
 import passport from 'passport';
 import pool from '#services/pg_pool.js';
 import redisClient from '#config/redis.js';
@@ -37,7 +39,17 @@ const __dirname = dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 5000;
 const APP_VERSION = 'v1';
-const REQUEST_SIZE_LIMIT = `${process.env.REQUEST_SIZE_LIMIT || 20}mb`;
+const configuredRequestSizeLimit = process.env.REQUEST_SIZE_LIMIT?.trim();
+const REQUEST_SIZE_LIMIT = configuredRequestSizeLimit
+    ? /^\d+(?:\.\d+)?$/.test(configuredRequestSizeLimit)
+        ? `${configuredRequestSizeLimit}mb`
+        : configuredRequestSizeLimit
+    : '20mb';
+if (!/^\d+(?:\.\d+)?(?:b|kb|mb|gb)?$/i.test(REQUEST_SIZE_LIMIT)) {
+    throw new Error(
+        'REQUEST_SIZE_LIMIT must be a number of megabytes or a size such as 20mb.'
+    );
+}
 
 // Keep query strings out of request logs because auth links carry bearer tokens.
 app.use(
@@ -59,14 +71,6 @@ if (trustedProxySetting) {
     );
 }
 
-// Shared across instances; auth routes apply tighter account-aware limits.
-app.use(
-    createRedisRateLimiter({
-        scope: 'global',
-        windowSeconds: 5 * 60,
-        maxIp: 5000,
-    })
-);
 // CORS
 const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? '')
     .split(',')
@@ -117,6 +121,17 @@ app.post(
     shipBubbleWebhook
 );
 
+// Limit application API traffic after registering provider webhooks so their
+// delivery does not depend on the application rate limiter or Redis.
+app.use(
+    `/${APP_VERSION}/api`,
+    createRedisRateLimiter({
+        scope: 'global',
+        windowSeconds: 5 * 60,
+        maxIp: 5000,
+    })
+);
+
 // Parsing
 app.use(cookieParser());
 app.use(sessionMiddleware);
@@ -151,6 +166,23 @@ app.get('/health', (req, res) => {
     });
 });
 
+// Readiness check for load balancers; /health remains a process liveness check.
+app.get('/health/ready', async (req, res) => {
+    const [database, redis] = await Promise.allSettled([
+        pool.query('SELECT 1'),
+        redisClient.ping(),
+    ]);
+    const ready = database.status === 'fulfilled' && redis.status === 'fulfilled';
+    res.status(ready ? 200 : 503).json({
+        success: ready,
+        message: ready ? 'Application dependencies are ready.' : 'Application dependencies are unavailable.',
+        dependencies: {
+            database: database.status === 'fulfilled',
+            redis: redis.status === 'fulfilled',
+        },
+    });
+});
+
 // 404
 app.use((req, res) => {
     res.status(404).json({
@@ -164,6 +196,8 @@ app.use((req, res) => {
 // Global error handler
 app.use((err, req, res, next) => {
     console.error('Global error handler:', err);
+
+    if (res.headersSent) return next(err);
 
     if (err.message === 'Not allowed by CORS') {
         return res.status(403).json({
@@ -184,10 +218,11 @@ app.use((err, req, res, next) => {
     });
 });
 
-// const stopCheckoutWorker = startCheckoutWorker();
-// const stopPaystackWebhookWorker = startPaystackWebhookWorker();
-// const stopSubscriptionLifecycleJob = startSubscriptionLifecycleJob();
+const stopCheckoutWorker = startCheckoutWorker();
+const stopPaystackWebhookWorker = startPaystackWebhookWorker();
+const stopSubscriptionLifecycleJob = startSubscriptionLifecycleJob();
 const stopShipbubbleLabelWorker = startShipbubbleLabelWorker();
+const stopShipbubbleTrackingWorker = startShipbubbleTrackingWorker();
 
 const server = app.listen(PORT, () => {
     console.log(`Server running on port ${PORT} — http://localhost:${PORT}/`);
@@ -198,7 +233,11 @@ const shutdown = (signal) => {
     if (shuttingDown) return;
     shuttingDown = true;
     console.log(`${signal} received: closing server and background workers`);
+    stopCheckoutWorker();
+    stopPaystackWebhookWorker();
+    stopSubscriptionLifecycleJob();
     stopShipbubbleLabelWorker();
+    stopShipbubbleTrackingWorker();
 
     const forceExit = setTimeout(() => {
         console.error('Graceful shutdown timed out.');
@@ -214,7 +253,7 @@ const shutdown = (signal) => {
     });
 };
 
-// process.once('SIGTERM', () => shutdown('SIGTERM'));
-// process.once('SIGINT', () => shutdown('SIGINT'));
+process.once('SIGTERM', () => shutdown('SIGTERM'));
+process.once('SIGINT', () => shutdown('SIGINT'));
 
 export default app;

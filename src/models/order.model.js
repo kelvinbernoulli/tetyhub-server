@@ -509,7 +509,7 @@ class Order {
                 ]
             );
             await client.query(
-                `INSERT INTO marketplace_ledger_entries
+                `INSERT INTO ledger_entries
                  (vendor_id, order_id, fulfillment_id, entry_type, amount, currency_id,
                   idempotency_key, metadata)
                  VALUES ($1, $2, $3, 'payout_eligible', 0, $4, $5, $6)

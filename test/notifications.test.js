@@ -243,7 +243,10 @@ test('shipment updates commit notifications together and omit private notes', as
     await Shipment.updateShipment(9, 5, { status: 'shipped' });
     assert.equal(notifications(calls).length, 1);
     assert.ok(!JSON.stringify(notifications(calls)).includes('Private note'));
-    assert.equal(calls.at(-2).sql, 'COMMIT');
+    const commitIndex = calls.findIndex(({ sql }) => sql === 'COMMIT');
+    const releaseIndex = calls.findIndex(({ sql }) => sql === 'RELEASE');
+    assert.ok(commitIndex >= 0);
+    assert.ok(releaseIndex > commitIndex);
 });
 
 test('failed shipment notification rolls back the shipment and tracking changes', async (t) => {
@@ -287,7 +290,10 @@ test('reservation expiry notifies only rows that actually transition, in one tra
             : undefined
     );
     await expireBookings();
-    assert.equal(notifications(calls).length, 1);
+    assert.deepEqual(
+        notifications(calls).map(({ values }) => values[0]),
+        [[1], [11, 12]]
+    );
     assert.equal(calls[0].sql, 'BEGIN');
     assert.equal(calls.at(-2).sql, 'COMMIT');
 });

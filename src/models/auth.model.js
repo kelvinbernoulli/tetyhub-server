@@ -54,10 +54,10 @@ export class Auth {
         const link = new URL('/verify-email', frontendBase);
         link.searchParams.set('token', token);
         link.searchParams.set('email', user.email);
-
+console.log(`Verification link for ${user.email}: ${link.toString()}`); 
         await sendEmailVerificationLink(user, link.toString());
         return { success: true, message: 'Verification email sent' };
-    }
+    }   
 
     static async forgotPassword(email) {
         const { rows } = await pool.query(

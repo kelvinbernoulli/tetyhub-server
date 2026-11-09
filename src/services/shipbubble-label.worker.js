@@ -4,6 +4,7 @@ import { transaction } from '#utils/checkout.js';
 import Notification from '#models/notification.model.js';
 import { platformRecipients } from '#services/notifications.js';
 import { syncOrderFulfillment } from '#models/shipment.model.js';
+import { emailShipmentUpdate } from '#services/shipment-notifications.js';
 
 const BOOKABLE_ORDER_STATUSES = [
     'processing',
@@ -157,6 +158,7 @@ async function persistLabel(quote, details) {
     if (typeof details.orderId !== 'string' && typeof details.orderId !== 'number')
         throw new Error('ShipBubble label response did not include an order ID');
 
+    let shipmentForEmail = null;
     await transaction(pool, async (client) => {
         const { rows: orderRows } = await client.query(
             'SELECT * FROM orders WHERE id = $1 FOR UPDATE',
@@ -226,8 +228,12 @@ async function persistLabel(quote, details) {
             await client.query(
                 `INSERT INTO shipment_tracking_history
                     (shipment_id, status, description)
-                 VALUES ($1, $2, 'Label booked with ShipBubble')`,
-                [shipmentRows[0].id, details.status]
+                 VALUES ($1, $2, $3)`,
+                [
+                    shipmentRows[0].id,
+                    details.status,
+                    `ShipBubble status: ${details.status}`,
+                ]
             );
             shipment = shipmentRows[0];
         }
@@ -245,7 +251,14 @@ async function persistLabel(quote, details) {
             shipment,
             client
         );
+        shipmentForEmail = shipment;
     });
+    if (shipmentForEmail)
+        await emailShipmentUpdate(
+            quote.order_id,
+            shipmentForEmail,
+            'Shipping label booked with ShipBubble'
+        );
 }
 
 export function startShipbubbleLabelWorker({ intervalMs = 5000 } = {}) {

@@ -15,14 +15,19 @@ import {
 const QUOTE_LIFETIME_HOURS = 24;
 
 function addressKey(address) {
+    const shipbubbleEnvironment =
+        process.env.NODE_ENV === 'production' ? 'live' : 'test';
     return createHash('sha256')
         .update(
             JSON.stringify(
-                Object.fromEntries(
-                    Object.entries(address)
-                        .map(([key, value]) => [key, String(value ?? '').trim().toLowerCase()])
-                        .sort(([a], [b]) => a.localeCompare(b))
-                )
+                {
+                    environment: shipbubbleEnvironment,
+                    address: Object.fromEntries(
+                        Object.entries(address)
+                            .map(([key, value]) => [key, String(value ?? '').trim().toLowerCase()])
+                            .sort(([a], [b]) => a.localeCompare(b))
+                    ),
+                }
             )
         )
         .digest('hex');
@@ -54,6 +59,38 @@ async function validatedAddress(address) {
         [hash, String(result.address_code), JSON.stringify(result)]
     );
     return saved.rows[0];
+}
+
+async function requestRatesWithFreshSenderOnInvalidCode(
+    request,
+    sender,
+    senderAddress
+) {
+    try {
+        return await Shipbubble.requestRates({
+            ...request,
+            sender_address_code: Number(senderAddress.address_code),
+        });
+    } catch (error) {
+        if (
+            error?.status !== 422 ||
+            !/invalid sender address code/i.test(error.message || '')
+        ) {
+            throw error;
+        }
+
+        const hash = addressKey(sender);
+        await pool.query(
+            `DELETE FROM shipbubble_validated_addresses
+             WHERE address_hash = $1 AND address_code = $2`,
+            [hash, senderAddress.address_code]
+        );
+        const refreshedSenderAddress = await validatedAddress(sender);
+        return Shipbubble.requestRates({
+            ...request,
+            sender_address_code: Number(refreshedSenderAddress.address_code),
+        });
+    }
 }
 
 function lagosDateTime(date = new Date()) {
@@ -227,8 +264,7 @@ export async function requestVendorShippingRates(userId, vendorId, data) {
                 shipbubble_category_id: group.category_id,
             };
         });
-        const response = await Shipbubble.requestRates({
-            sender_address_code: Number(senderAddress.address_code),
+        const response = await requestRatesWithFreshSenderOnInvalidCode({
             reciever_address_code: Number(receiverAddress.address_code),
             pickup_date: pickupDate,
             category_id: group.category_id,
@@ -236,7 +272,7 @@ export async function requestVendorShippingRates(userId, vendorId, data) {
             package_dimension: parcel.package_dimension,
             service_type: data.service_type,
             delivery_instructions: data.delivery_instructions,
-        });
+        }, sender, senderAddress);
         const requestToken = response?.data?.request_token;
         const couriers = response?.data?.couriers;
         if (!requestToken || !Array.isArray(couriers) || !couriers.length)

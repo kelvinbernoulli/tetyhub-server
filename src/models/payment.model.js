@@ -13,7 +13,7 @@ import {
 
 export class Payment {
     static gatewayApi = gatewayApi;
-    static async initiatePayment(userId, orderId, gateway) {
+    static async initiatePayment(userId, orderId, gateway = 'paystack') {
         const attempt = await transaction(pool, async (client) => {
             const { rows } = await client.query(
                 `SELECT o.*, c.code AS currency, COALESCE(o.contact_email,u.email) AS email
@@ -205,9 +205,22 @@ export class Payment {
             const amount =
                 gateway === 'stripe' && success
                     ? data.amount_received
-                    : data.amount;
+                    : gateway === 'paystack' &&
+                        success &&
+                        data.requested_amount !== undefined &&
+                        data.requested_amount !== null
+                      ? data.requested_amount
+                      : data.amount;
+            const receivedAmount = Number(data.amount);
+            const expectedAmount = Number(amount);
+            const amountIsInsufficient =
+                gateway === 'paystack' &&
+                success &&
+                (!Number.isSafeInteger(receivedAmount) ||
+                    receivedAmount < expectedAmount);
             if (
                 Number(amount) !== minorUnits(payment.amount) ||
+                amountIsInsufficient ||
                 String(data.currency).toUpperCase() !== payment.currency ||
                 minorUnits(order.total) !== minorUnits(payment.amount)
             )

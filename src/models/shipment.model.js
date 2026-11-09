@@ -7,9 +7,28 @@ import {
     aggregateFulfillmentStatus,
     shipmentFulfillmentStatus,
 } from '#services/order-fulfillment.js';
+import { emailShipmentUpdate } from '#services/shipment-notifications.js';
 
-const editableFields = ['tracking_number', 'carrier', 'shipping_method', 'estimated_delivery', 'shipping_cost', 'status', 'notes'];
-const publicFields = ['tracking_number', 'carrier', 'shipping_method', 'estimated_delivery', 'status'];
+const editableFields = [
+    'tracking_number',
+    'tracking_url',
+    'waybill_document',
+    'carrier',
+    'shipping_method',
+    'estimated_delivery',
+    'shipping_cost',
+    'status',
+    'notes',
+];
+const publicFields = [
+    'tracking_number',
+    'tracking_url',
+    'waybill_document',
+    'carrier',
+    'shipping_method',
+    'estimated_delivery',
+    'status',
+];
 
 export async function syncOrderFulfillment(client, order, changedBy = null) {
     if (['cancelled', 'returned', 'refunded', 'payment_review'].includes(order.status)) return;
@@ -73,7 +92,7 @@ async function history(client, shipment, data, changedBy) {
 class Shipment {
     static async createShipment(orderId, vendorId, data, changedBy = null) {
         if (!vendorId) throw new CheckoutError('Forbidden', 403);
-        return transaction(pool, async client => {
+        const shipment = await transaction(pool, async client => {
             const { rows } = await client.query(
                 `SELECT * FROM orders WHERE id = $1 AND EXISTS
                  (SELECT 1 FROM order_items oi WHERE oi.order_id = orders.id AND oi.vendor_id = $2 AND oi.product_id IS NOT NULL) FOR UPDATE`,
@@ -101,9 +120,13 @@ class Shipment {
             );
             if (existing.rows.length) throw new CheckoutError('Shipment already exists or requires legacy reconciliation', 409);
             const { rows: created } = await client.query(
-                `INSERT INTO shipments (order_id, vendor_id, tracking_number, carrier, shipping_method, estimated_delivery, shipping_cost, status, notes)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8) RETURNING *`,
-                [orderId, vendorId, data.tracking_number, data.carrier, data.shipping_method ?? null,
+                `INSERT INTO shipments
+                    (order_id, vendor_id, tracking_number, tracking_url, waybill_document,
+                     carrier, shipping_method, estimated_delivery, shipping_cost, status, notes)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', $10)
+                 RETURNING *`,
+                [orderId, vendorId, data.tracking_number, data.tracking_url ?? null,
+                    data.waybill_document ?? null, data.carrier, data.shipping_method ?? null,
                     data.estimated_delivery ?? null, data.shipping_cost ?? 0, data.notes ?? null]
             );
             const shipment = created[0];
@@ -112,6 +135,8 @@ class Shipment {
             await Notification.notifyShipmentUpdate(order.id, order.user_id, shipment, client);
             return shipment;
         });
+        await emailShipmentUpdate(orderId, shipment, 'Shipment created');
+        return shipment;
     }
 
     static async updateShipment(
@@ -123,7 +148,8 @@ class Shipment {
         deduplicateTracking = false
     ) {
         if (!vendorId) throw new CheckoutError('Forbidden', 403);
-        return transaction(pool, async client => {
+        let emailAfterCommit = null;
+        const result = await transaction(pool, async client => {
             // Lock the order first on every write, serializing fulfillment across its vendors.
             const { rows: orders } = await client.query(
                 `SELECT o.* FROM orders o JOIN shipments s ON s.order_id = o.id
@@ -169,15 +195,28 @@ class Shipment {
                     [shipmentId]
                 );
                 const latest = latestEvents[0];
-                if (staleInternalAcceptance) return latest ?? shipment;
+                const trackingDetailsChanged = [
+                    'tracking_number',
+                    'tracking_url',
+                    'waybill_document',
+                    'carrier',
+                    'estimated_delivery',
+                ].some(
+                    (field) =>
+                        updateData[field] !== undefined &&
+                        String(updateData[field]) !== String(shipment[field])
+                );
+                if (staleInternalAcceptance && !trackingDetailsChanged)
+                    return latest ?? shipment;
                 const eventStatus = updateData.status ?? shipment.status;
                 if (
                     latest &&
                     latest.status === eventStatus &&
                     latest.location === (updateData.location ?? null) &&
                     latest.description ===
-                        (updateData.tracking_description ??
-                            `Shipment ${eventStatus.replaceAll('_', ' ')}`)
+                        (updateData.tracking_description ?? updateData.description ??
+                            `Shipment ${eventStatus.replaceAll('_', ' ')}`) &&
+                    !trackingDetailsChanged
                 )
                     return latest;
             }
@@ -199,15 +238,54 @@ class Shipment {
             const hasEvent = tracking || changed || updateData.location !== undefined || updateData.tracking_description !== undefined;
             const event = hasEvent ? await history(client, updated, updateData, changedBy) : null;
             if (changed) await syncOrderFulfillment(client, order, changedBy);
-            if (hasEvent || publicFields.some(field => updateData[field] !== undefined && String(updateData[field]) !== String(shipment[field]))) {
-                await Notification.notifyShipmentUpdate(order.id, order.user_id, updated, client);
+            const notify =
+                hasEvent ||
+                publicFields.some(
+                    (field) =>
+                        updateData[field] !== undefined &&
+                        String(updateData[field]) !== String(shipment[field])
+                );
+            if (notify) {
+                await Notification.notifyShipmentUpdate(
+                    order.id,
+                    order.user_id,
+                    updated,
+                    client,
+                    updateData.tracking_description ?? updateData.description ?? null
+                );
+                emailAfterCommit = {
+                    orderId: order.id,
+                    shipment: updated,
+                    description:
+                        updateData.tracking_description ??
+                        updateData.description ??
+                        null,
+                };
             }
             return tracking ? event : updated;
         });
+        if (emailAfterCommit)
+            await emailShipmentUpdate(
+                emailAfterCommit.orderId,
+                emailAfterCommit.shipment,
+                emailAfterCommit.description
+            );
+        return result;
     }
 
     static async addTrackingUpdate(shipmentId, vendorId, data, changedBy = null) {
-        return this.updateShipment(shipmentId, vendorId, data, changedBy, true);
+        const updateData = { ...data };
+        if (updateData.tracking_description === undefined && data.description !== undefined)
+            updateData.tracking_description = data.description;
+        delete updateData.description;
+        return this.updateShipment(
+            shipmentId,
+            vendorId,
+            updateData,
+            changedBy,
+            true,
+            true
+        );
     }
 
     static async getShipmentsByOrderId(orderId, vendorId = null, userId = null) {

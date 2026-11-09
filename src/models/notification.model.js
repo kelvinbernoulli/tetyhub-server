@@ -139,20 +139,24 @@ class Notification {
         orderId,
         userId,
         shipment,
-        client = pool
+        client = pool,
+        description = null
     ) {
         return this.createNotification(
             userId,
             'shipment_update',
             'Shipment updated',
-            `Your shipment is ${shipment.status.replaceAll('_', ' ')}.${shipment.tracking_number ? ` Tracking: ${shipment.tracking_number}` : ''}`,
+            `Your shipment is ${shipment.status.replaceAll('_', ' ')}.${description ? ` ${description}` : ''}${shipment.tracking_number ? ` Tracking: ${shipment.tracking_number}` : ''}`,
             {
                 order_id: orderId,
                 shipment_id: shipment.id,
                 status: shipment.status,
                 tracking_number: shipment.tracking_number,
+                tracking_url: shipment.tracking_url,
+                waybill_document: shipment.waybill_document,
                 carrier: shipment.carrier,
                 estimated_delivery: shipment.estimated_delivery,
+                description,
             },
             client
         );

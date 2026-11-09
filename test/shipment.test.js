@@ -79,7 +79,11 @@ test('one vendor delivery does not complete a split order', async t => {
 test('creation records pending shipment and awaiting shipment order histories', async t => {
     const calls = database(t, { next: 'pending', orderStatus: 'processing' });
     await Shipment.createShipment(1, 3, { carrier: 'Manual', tracking_number: 'ABC' }, 90);
-    assert.deepEqual(calls.find(x => x.sql.startsWith('INSERT INTO shipments')).values.slice(0, 4), [1, 3, 'ABC', 'Manual']);
+    const shipmentInsert = calls.find(x => x.sql.startsWith('INSERT INTO shipments'));
+    assert.deepEqual(shipmentInsert.values.slice(0, 3), [1, 3, 'ABC']);
+    assert.equal(shipmentInsert.values[3], null);
+    assert.equal(shipmentInsert.values[4], null);
+    assert.equal(shipmentInsert.values[5], 'Manual');
     assert.equal(calls.find(x => x.sql.startsWith('INSERT INTO order_status_history')).values[1], 'awaiting_shipment');
 });
 

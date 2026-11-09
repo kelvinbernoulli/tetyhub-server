@@ -106,6 +106,43 @@ export const sendOrderStatusEmail = async (user, order, vendor) => {
     }
 };
 
+export const sendShipmentStatusEmail = async (
+    user,
+    orderNumber,
+    shipment,
+    description = null
+) => {
+    const status = String(shipment.status ?? 'updated').replaceAll('_', ' ');
+    const details = [
+        `Hello${user.firstname ? ` ${user.firstname}` : ''},`,
+        '',
+        `There is a shipping update for order ${orderNumber}.`,
+        `Status: ${status}.`,
+        description ? `Update: ${description}` : null,
+        shipment.carrier ? `Carrier: ${shipment.carrier}` : null,
+        shipment.tracking_number
+            ? `Tracking number: ${shipment.tracking_number}`
+            : null,
+        shipment.tracking_url ? `Track shipment: ${shipment.tracking_url}` : null,
+        shipment.estimated_delivery
+            ? `Estimated delivery: ${new Date(shipment.estimated_delivery).toLocaleDateString('en-NG')}`
+            : null,
+    ].filter(Boolean);
+
+    try {
+        await transporter.sendMail({
+            from: process.env.EMAIL_USER,
+            to: user.email,
+            subject: `Shipping update for order ${orderNumber}`,
+            text: details.join('\n'),
+        });
+        return true;
+    } catch (error) {
+        console.error('Shipment status email failed:', error.message);
+        return false;
+    }
+};
+
 export const sendKYCSubmissionEmail = async (user, type) => {
     try {
         await transporter.sendMail({

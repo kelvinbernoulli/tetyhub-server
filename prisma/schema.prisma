@@ -1453,6 +1453,7 @@ model service_bookings {
   cancellation_fee_percent  Float            @default(0) @map("cancellation_fee_percent")
   reservation_expires_at    DateTime?        @default(dbgenerated("(now() + interval '24 hours')")) @map("reservation_expires_at")
   created_at                DateTime         @default(now()) @map("created_at")
+  updated_at                DateTime?        @db.Timestamptz(3) @map("updated_at")
   booking_status            String           @default("pending") @map("booking_status") // pending, accepted, declined, confirmed, active, completed, cancelled, expired, payment_review
   note                      String?          @map("note")
   vendor_response_note      String?

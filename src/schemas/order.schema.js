@@ -30,6 +30,8 @@ export const cancelOrderSchema = Joi.object({
 export const createShipmentSchema = Joi.object({
     location: Joi.string().trim().max(255).optional().label("Location"),
     tracking_number: Joi.string().trim().max(100).required().label("Tracking Number"),
+    tracking_url: Joi.string().uri({ scheme: ['http', 'https'] }).max(2048).optional().allow(null, '').label("Tracking URL"),
+    waybill_document: Joi.string().uri({ scheme: ['http', 'https'] }).max(2048).optional().allow(null, '').label("Waybill Document"),
     carrier: Joi.string().trim().max(100).required().label("Carrier"),
     shipping_method: Joi.string().trim().max(100).optional().label("Shipping Method"),
     estimated_delivery: Joi.date().optional().label("Estimated Delivery Date"),
@@ -39,6 +41,8 @@ export const createShipmentSchema = Joi.object({
 
 export const updateShipmentSchema = Joi.object({
     tracking_number: Joi.string().trim().max(100).optional().label("Tracking Number"),
+    tracking_url: Joi.string().uri({ scheme: ['http', 'https'] }).max(2048).optional().allow(null, '').label("Tracking URL"),
+    waybill_document: Joi.string().uri({ scheme: ['http', 'https'] }).max(2048).optional().allow(null, '').label("Waybill Document"),
     carrier: Joi.string().trim().max(100).optional().label("Carrier"),
     shipping_method: Joi.string().trim().max(100).optional().label("Shipping Method"),
     estimated_delivery: Joi.date().optional().label("Estimated Delivery Date"),

@@ -368,8 +368,8 @@ export class Cart {
                     SUM(ci.quantity * ci.price) AS total,
                     COUNT(ci.id) AS item_count
                 FROM carts c
-                LEFT JOIN cart_items ci ON ci.cart_id = c.id
-                LEFT JOIN products p ON p.id = ci.product_id
+                JOIN cart_items ci ON ci.cart_id = c.id
+                JOIN products p ON p.id = ci.product_id
                 WHERE c.user_id = $1
                 GROUP BY c.id
                 LIMIT $3 OFFSET $2`,

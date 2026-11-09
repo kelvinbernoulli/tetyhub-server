@@ -68,18 +68,19 @@ export const cartItems = async (req, res) => {
         }
 
         const result = await Cart.getCartItems(user.id, pagination);
-
-        // Handle model-level errors
-        if (result?.error) {
-            return respondWithError(
-                res,
-                result.code,
-                result.error,
-                ERROR_CODES.VALIDATION_ERROR
-            );
-        }
-
-        return respondWithSuccess(res, 200, 'Cart items retrieved successfully', result);
+        const isEmpty = result === null;
+        return respondWithSuccess(
+            res,
+            200,
+            isEmpty ? 'Cart is empty' : 'Cart items retrieved successfully',
+            result ?? {
+                cart_id: null,
+                user_id: user.id,
+                items: [],
+                total: 0,
+                item_count: 0,
+            }
+        );
     } catch (error) {
         console.error('Error retrieving cart items:', error);
         return respondWithError(
