@@ -190,6 +190,7 @@ export const googleAuth = (req, res, next) => {
 export const googleAuthCallback = (req, res, next) => {
     try {
         passport.authenticate("google", { session: false }, async (err, user) => {
+            console.log('user', user);
             try {
                 if (err) {
                     console.error('Google authentication failed:', {
@@ -198,7 +199,7 @@ export const googleAuthCallback = (req, res, next) => {
                     });
                     return res.redirect(`${frontendBase}/login?error=server_error`);
                 }
-
+                 console.log('user', user);
                 if (!user) {
                     return res.redirect(`${frontendBase}/login?error=google_auth_failed`);
                 }

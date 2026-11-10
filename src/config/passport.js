@@ -31,6 +31,11 @@ passport.use(
                 // The email returned by Google is only suitable for account
                 // linking when Google's user-info response marks it verified.
                 if (!email || !googleId || profile._json?.email_verified !== true) {
+                    console.warn('Google sign-in rejected: Google profile is missing a verified email or subject.', {
+                        hasEmail: Boolean(email),
+                        hasGoogleSubject: Boolean(googleId),
+                        emailVerified: profile._json?.email_verified === true,
+                    });
                     return done(null, false);
                 }
 
@@ -41,7 +46,12 @@ passport.use(
                     lastname: profile.name?.familyName ?? null,
                 });
 
-                return done(null, user ?? false);
+                if (!user) {
+                    console.warn('Google sign-in rejected: account is inactive, ineligible, ambiguous, or linked to another Google account.');
+                    return done(null, false);
+                }
+
+                return done(null, user);
             } catch (error) {
                 console.error('Google account authentication failed:', error?.message ?? 'Unknown error');
                 return done(error, false);
