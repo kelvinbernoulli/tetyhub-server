@@ -150,7 +150,6 @@ app.use('/assets', express.static(path.join(__dirname, 'assets')));
 // Routes
 app.use(`/${APP_VERSION}/api/auth`, auth);
 app.use(`/${APP_VERSION}/api/admin`, admin);
-// app.use(`/${APP_VERSION}/api/user`, user);
 app.use(`/${APP_VERSION}/api/vendor`, vendor);
 app.use(`/${APP_VERSION}/api`, web);
 
