@@ -190,19 +190,20 @@ export const googleAuth = (req, res, next) => {
 export const googleAuthCallback = (req, res, next) => {
     try {
         passport.authenticate("google", { session: false }, async (err, user, info) => {
-            console.log('user', user);
-            console.log('info', info);
             try {
                 if (err) {
                     console.error('Google authentication failed:', {
                         name: err.name,
                         code: err.code ?? null,
                     });
-                    return respondWithError(res, 500, "Internal Server Error during Google authentication", ERROR_CODES.INTERNAL_SERVER_ERROR);
+                    return res.redirect(`${frontendBase}/login?error=server_error`);
                 }
-                console.log('user', user);
+
                 if (!user) {
-                    return respondWithError(res, 401, "Google authentication failed", ERROR_CODES.UNAUTHORIZED);
+                    if (info?.message) {
+                        console.warn('Google authentication was not completed:', info.message);
+                    }
+                    return res.redirect(`${frontendBase}/login?error=google_auth_failed`);
                 }
 
                 if (
@@ -210,13 +211,21 @@ export const googleAuthCallback = (req, res, next) => {
                     user.status !== 'active' ||
                     user.email_verified !== true
                 ) {
-                    return respondWithError(res, 401, "Google authentication failed", ERROR_CODES.UNAUTHORIZED);
+                    return res.redirect(`${frontendBase}/login?error=google_auth_failed`);
                 }
 
                 await establishAuthenticatedSession(req, user);
+
+                if (user.role === ROLES.CUSTOMER) {
+                    return res.redirect(`${frontendBase}`);
+                }
+                return res.redirect(`${frontendBase}/dashboard`);
             } catch (error) {
-                console.error('Unable to establish Google session:', error);
-                return respondWithError(res, 500, "Internal Server Error", ERROR_CODES.INTERNAL_SERVER_ERROR);
+                console.error('Unable to establish Google session:', {
+                    name: error?.name ?? 'Error',
+                    code: error?.code ?? null,
+                });
+                return res.redirect(`${frontendBase}/login?error=server_error`);
             }
         }
         )(req, res, next);
