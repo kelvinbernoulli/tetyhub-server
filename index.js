@@ -69,6 +69,10 @@ if (trustedProxySetting) {
             ? hopCount
             : trustedProxySetting.split(',').map((entry) => entry.trim())
     );
+} else if (process.env.NODE_ENV === 'production') {
+    // Render terminates TLS at its proxy. Trust its single forwarding hop so
+    // express-session can recognize HTTPS and issue Secure cookies.
+    app.set('trust proxy', 1);
 }
 
 // CORS
