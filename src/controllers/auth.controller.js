@@ -189,7 +189,7 @@ export const googleAuth = (req, res, next) => {
 
 export const googleAuthCallback = (req, res, next) => {
     try {
-        passport.authenticate("google", { session: true }, async (err, user, info) => {
+        passport.authenticate("google", { session: false }, async (err, user, info) => {
             console.log('user', user);
             console.log('info', info);
             try {
