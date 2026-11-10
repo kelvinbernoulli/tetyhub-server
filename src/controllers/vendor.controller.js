@@ -8,10 +8,11 @@ import {
 import ERROR_CODES from '#utils/error.codes.js';
 import { ROLES } from '#utils/helpers.js';
 import { respondWithError, respondWithSuccess } from '#utils/response.js';
+import { parseOrderDetailQuery, parseOrderListQuery } from '#utils/order-query.js';
 
 export const getVendorOrders = async (req, res) => {
     try {
-        const { session, query, pagination } = req;
+        const { session } = req;
         const user = session?.user;
 
         if (!user) {
@@ -23,30 +24,21 @@ export const getVendorOrders = async (req, res) => {
             );
         }
 
-        const { offset, limit } = pagination;
-        const { status, payment_status } = query;
-
-        const orders = await Order.fetchVendorOrders(req.auth.vendorId, {
-            status,
-            payment_status,
-            offset,
-            limit,
-        });
-
-        if (orders.length === 0) {
-            return respondWithError(
-                res,
-                404,
-                'No orders found',
-                ERROR_CODES.RESOURCE_NOT_FOUND
-            );
+        if (!req.auth?.vendorId) {
+            return respondWithError(res, 403, 'Forbidden', ERROR_CODES.FORBIDDEN);
         }
+        const parsed = parseOrderListQuery(req.query, 'vendor');
+        if (parsed.error) {
+            return respondWithError(res, 400, parsed.error, ERROR_CODES.VALIDATION_ERROR);
+        }
+
+        const result = await Order.fetchVendorOrders(req.auth.vendorId, parsed.value);
 
         return respondWithSuccess(
             res,
             200,
             'Orders fetched successfully',
-            orders
+            res.paginate(result.orders, result.total)
         );
     } catch (error) {
         console.error('Error fetching vendor orders:', error);
@@ -61,7 +53,7 @@ export const getVendorOrders = async (req, res) => {
 
 export const getVendorOrderById = async (req, res) => {
     try {
-        const { session, query, params, pagination } = req;
+        const { session, params } = req;
         const user = session?.user;
 
         if (!user) {
@@ -73,44 +65,34 @@ export const getVendorOrderById = async (req, res) => {
             );
         }
 
-        let vendorId;
-        if (user.role === ROLES.VENDOR) {
-            vendorId = user.id;
-        } else if (user.role === ROLES.VENDOR_ADMIN) {
-            vendorId = user.vendor_id;
-        } else {
-            return respondWithError(
-                res,
-                403,
-                'Forbidden',
-                ERROR_CODES.FORBIDDEN
-            );
-        }
-
-        if (!vendorId) {
-            return respondWithError(
-                res,
-                403,
-                'Forbidden',
-                ERROR_CODES.FORBIDDEN
-            );
+        if (!req.auth?.vendorId) {
+            return respondWithError(res, 403, 'Forbidden', ERROR_CODES.FORBIDDEN);
         }
 
         const { orderId } = params;
-        const { offset, limit } = pagination;
-        const { status, payment_status } = query;
+        if (!/^[1-9]\d*$/.test(String(orderId)) || Number(orderId) > 2147483647) {
+            return respondWithError(res, 400, 'Invalid order ID', ERROR_CODES.VALIDATION_ERROR);
+        }
+        const parsed = parseOrderDetailQuery(req.query);
+        if (parsed.error) {
+            return respondWithError(res, 400, parsed.error, ERROR_CODES.VALIDATION_ERROR);
+        }
 
-        const orders = await Order.getOrderById(
+        const order = await Order.getOrderById(
             orderId,
             null,
-            req.auth.vendorId
+            req.auth.vendorId,
+            { include: parsed.value }
         );
+        if (!order) {
+            return respondWithError(res, 404, 'Order not found', ERROR_CODES.RESOURCE_NOT_FOUND);
+        }
 
         return respondWithSuccess(
             res,
             200,
-            'Orders fetched successfully',
-            orders
+            'Order fetched successfully',
+            order
         );
     } catch (error) {
         console.error('Error fetching vendor orders:', error);
@@ -480,21 +462,22 @@ export const getCustomerOrders = async (req, res) => {
             vendorId = user.vendor_id;
         }
 
-        const { offset, limit } = pagination;
-        const { status } = query;
+        const parsed = parseOrderListQuery(query, 'vendor');
+        if (parsed.error) {
+            return respondWithError(res, 400, parsed.error, ERROR_CODES.VALIDATION_ERROR);
+        }
 
-        const orders = await Order.fetchCustomerOrders(
+        const result = await Order.fetchCustomerOrders(
             user.id,
             vendorId,
-            status,
-            { offset: parseInt(offset), limit: parseInt(limit) }
+            parsed.value
         );
 
         return respondWithSuccess(
             res,
             200,
             'Orders fetched successfully',
-            orders
+            res.paginate(result.orders, result.total)
         );
     } catch (error) {
         console.error('Error fetching customer orders:', error);

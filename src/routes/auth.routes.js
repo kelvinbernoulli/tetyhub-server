@@ -47,6 +47,11 @@ const resetConfirmLimiter = createAuthRateLimiter({
     maxIp: 30,
     maxAccount: 10,
 });
+const googleOAuthLimiter = createAuthRateLimiter({
+    scope: 'google-oauth',
+    windowSeconds: 15 * 60,
+    maxIp: 30,
+});
 
 router.post("/signup", emailActionLimiter, AuthController.userSignup);
 router.get("/verify-email", emailActionLimiter, AuthController.verifyEmail);
@@ -64,7 +69,7 @@ router.post("/signout", authenticated, AuthController.signOut);
 router.post("/password-reset/request", emailActionLimiter, AuthController.requestPasswordReset);
 router.post("/password-reset/confirm", resetConfirmLimiter, AuthController.confirmPasswordReset);
 router.post("/admin-invitations/accept", invitationLimiter, AdminController.acceptAdminInvitation);
-router.get('/google', AuthController.googleAuth);
-router.get('/google/callback', AuthController.googleAuthCallback);
+router.get('/google', googleOAuthLimiter, AuthController.googleAuth);
+router.get('/google/callback', googleOAuthLimiter, AuthController.googleAuthCallback);
 
 export default router;

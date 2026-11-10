@@ -1,74 +1,50 @@
-import passport from "passport";
-import { Strategy as GoogleStrategy } from "passport-google-oauth20";
-import crypto from "crypto";
-import User from "#models/user.model.js";
-import { passwordHash } from "#utils/helpers.js";
-import Query from "#models/query.model.js";
-import { config } from "dotenv";
-config();
+import passport from 'passport';
+import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
+import '#config/env.js';
+import User from '#models/user.model.js';
 
+const googleConfig = {
+    clientID: process.env.GOOGLE_CLIENT_ID,
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+    callbackURL: process.env.GOOGLE_CALLBACK_URL,
+};
+const missingGoogleConfig = Object.entries(googleConfig)
+    .filter(([, value]) => !value?.trim())
+    .map(([key]) => key);
+
+if (missingGoogleConfig.length) {
+    throw new Error(`Missing Google OAuth configuration: ${missingGoogleConfig.join(', ')}`);
+}
 
 passport.use(
     new GoogleStrategy(
         {
-            clientID: process.env.GOOGLE_CLIENT_ID,
-            clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-            callbackURL: process.env.GOOGLE_CALLBACK_URL,
+            ...googleConfig,
+            state: true,
+            pkce: 'S256',
         },
-        async (accessToken, refreshToken, profile, done) => {
+        async (_accessToken, _refreshToken, profile, done) => {
             try {
-                const email = profile.emails?.[0]?.value;
-                if (!email) {
-                    return done(new Error("Google account has no email"), null);
+                const email = profile.emails?.[0]?.value?.trim().toLowerCase();
+                const googleId = profile.id?.trim();
+
+                // The email returned by Google is only suitable for account
+                // linking when Google's user-info response marks it verified.
+                if (!email || !googleId || profile._json?.email_verified !== true) {
+                    return done(null, false);
                 }
 
-                let user = await User.getUserByEmail(email);
-                const emailVerifyToken = crypto.randomBytes(20).toString("hex");
-                // Link Google account if user exists
-                if (user && !user.google_id) {
-                    await Query.update_by_id("users", user.id, {
-                        google_id: profile.id,
-                        email_verification_token: emailVerifyToken,
-                        email_verified: true,
-                    });
+                const user = await User.authenticateGoogleAccount({
+                    googleId,
+                    email,
+                    firstname: profile.name?.givenName ?? null,
+                    lastname: profile.name?.familyName ?? null,
+                });
 
-                    user = await User.getUserById(user.id);
-                }
-                const randPassword = crypto.randomBytes(8).toString('base64').replace(/[^a-zA-Z0-9]/g, '').slice(0, 8);
-
-                const password = await passwordHash(randPassword);
-                // Create new user
-                if (!user) {
-                    user = await Query.insert(
-                        "users",
-                        [
-                            "email",
-                            "firstname",
-                            "lastname",
-                            "google_id",
-                            "email_verified",
-                            "password",
-                            "role",
-                            "status",
-                            "email_verified_at"
-                        ],
-                        [
-                            email,
-                            profile.name?.givenName ?? null,
-                            profile.name?.familyName ?? null,
-                            profile.id,
-                            true,
-                            password,
-                            "customer",
-                            'active',
-                            new Date().toISOString()
-                        ]
-                    );
-                }
-                return done(null, user);
-            } catch (err) {
-                console.error("Google auth error:", err);
-                return done(err, null);
+                return done(null, user ?? false);
+            } catch (error) {
+                console.error('Google account authentication failed:', error?.message ?? 'Unknown error');
+                return done(error, false);
             }
         }
     )
@@ -82,8 +58,8 @@ passport.deserializeUser(async (id, done) => {
     try {
         const user = await User.getUserById(id);
         done(null, user);
-    } catch (err) {
-        done(err, null);
+    } catch (error) {
+        done(error, null);
     }
 });
 

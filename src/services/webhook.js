@@ -215,27 +215,42 @@ export async function stripeWebhook(req, res) {
 }
 
 export async function shipBubbleWebhook(req, res) {
-    console.log('Received ShipBubble webhook:', {
-        headers: req.headers,
-        body: req.body,
-        query: req.query,
-    });
-    const secret = process.env.SHIPBUBBLE_WEBHOOK_SECRET;
-    const suppliedSecret =
-        req.headers['x-ship-signature'] ??
-        (typeof req.headers.authorization === 'string' &&
-        req.headers.authorization.startsWith('Bearer ')
-            ? req.headers.authorization.slice(7)
-            : null);
+    const keyName = process.env.NODE_ENV === 'production'
+        ? 'SHIPBUBBLE_LIVE_KEY'
+        : 'SHIPBUBBLE_TEST_KEY';
+    const apiKey = process.env[keyName]?.trim();
+    if (!apiKey) {
+        console.error('ShipBubble webhook verification is not configured:', keyName);
+        return res.sendStatus(503);
+    }
+
+    const signature = req.headers['x-ship-signature'];
     if (
-        !secret ||
-        typeof suppliedSecret !== 'string' ||
-        Buffer.byteLength(secret) !== Buffer.byteLength(suppliedSecret) ||
-        !crypto.timingSafeEqual(Buffer.from(secret), Buffer.from(suppliedSecret))
+        !Buffer.isBuffer(req.body) ||
+        typeof signature !== 'string' ||
+        !/^[a-f0-9]{128}$/i.test(signature)
     )
         return res.sendStatus(401);
 
-    const payload = req.body;
+    const expectedSignature = crypto
+        .createHmac('sha512', apiKey)
+        .update(req.body)
+        .digest();
+    if (!crypto.timingSafeEqual(expectedSignature, Buffer.from(signature, 'hex')))
+        return res.sendStatus(401);
+
+    let payload;
+    try {
+        payload = JSON.parse(req.body.toString('utf8'));
+    } catch {
+        return res.sendStatus(400);
+    }
+    console.info('Received ShipBubble webhook:', {
+        event: typeof payload?.event === 'string' ? payload.event : null,
+        orderId: payload?.order_id === undefined ? null : String(payload.order_id),
+        status: typeof payload?.status === 'string' ? payload.status : null,
+    });
+
     const orderId = payload?.order_id === undefined || payload?.order_id === null
         ? null
         : String(payload.order_id);

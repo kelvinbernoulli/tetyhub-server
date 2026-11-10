@@ -1,12 +1,13 @@
 import { sendOrderConfirmationEmail } from '#models/mail.model.js';
 import Order from '#models/order.model.js';
 import { cancelOrderSchema } from '#schemas/order.schema.js';
+import { parseOrderDetailQuery, parseOrderListQuery } from '#utils/order-query.js';
 import ERROR_CODES from '#utils/error.codes.js';
 import { respondWithError, respondWithSuccess } from '#utils/response.js';
 
 export const getCustomerOrders = async (req, res) => {
     try {
-        const { session, query, pagination } = req;
+        const { session } = req;
         const user = session?.user;
 
         if (!user) {
@@ -18,28 +19,18 @@ export const getCustomerOrders = async (req, res) => {
             );
         }
 
-        const { offset, limit } = pagination;
-        const { status } = query;
-
-        const orders = await Order.fetchCustomerOrders(
-            user.id,
-            user.vendor_id,
-            { status, offset, limit }
-        );
-        if (orders.length === 0) {
-            return respondWithError(
-                res,
-                404,
-                'No orders found',
-                ERROR_CODES.RESOURCE_NOT_FOUND
-            );
+        const parsed = parseOrderListQuery(req.query, 'customer');
+        if (parsed.error) {
+            return respondWithError(res, 400, parsed.error, ERROR_CODES.VALIDATION_ERROR);
         }
+
+        const result = await Order.fetchCustomerOrders(req.auth?.userId ?? user.id, parsed.value);
 
         return respondWithSuccess(
             res,
             200,
             'Orders fetched successfully',
-            orders
+            res.paginate(result.orders, result.total)
         );
     } catch (error) {
         console.error('Error fetching customer orders:', error);
@@ -67,8 +58,20 @@ export const getCustomerOrderById = async (req, res) => {
         }
 
         const { orderId } = params;
+        if (!/^[1-9]\d*$/.test(String(orderId)) || Number(orderId) > 2147483647) {
+            return respondWithError(res, 400, 'Invalid order ID', ERROR_CODES.VALIDATION_ERROR);
+        }
+        const parsed = parseOrderDetailQuery(req.query);
+        if (parsed.error) {
+            return respondWithError(res, 400, parsed.error, ERROR_CODES.VALIDATION_ERROR);
+        }
 
-        const order = await Order.getOrderById(orderId, user.id);
+        const order = await Order.getOrderById(
+            orderId,
+            req.auth?.userId ?? user.id,
+            null,
+            { include: parsed.value }
+        );
 
         if (!order) {
             return respondWithError(
@@ -179,7 +182,7 @@ export const getOrderHistory = async (req, res) => {
         return respondWithError(
             res,
             500,
-            error.message || 'Internal Server Error',
+            'Internal Server Error',
             ERROR_CODES.INTERNAL_SERVER_ERROR
         );
     }
@@ -229,5 +232,48 @@ export const confirmVendorDelivery = async (req, res) => {
                     ? ERROR_CODES.INTERNAL_SERVER_ERROR
                     : ERROR_CODES.VALIDATION_ERROR
         );
+    }
+};
+
+export const fetchAllOrders = async (req, res) => {
+    try {
+        const parsed = parseOrderListQuery(req.query, 'admin');
+        if (parsed.error) {
+            return respondWithError(res, 400, parsed.error, ERROR_CODES.VALIDATION_ERROR);
+        }
+
+        const result = await Order.fetchAllOrders(parsed.value);
+        return respondWithSuccess(
+            res,
+            200,
+            'Orders fetched successfully',
+            res.paginate(result.orders, result.total)
+        );
+    } catch (error) {
+        console.error('Error fetching all orders:', error);
+        return respondWithError(res, 500, 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);
+    }
+};
+
+export const getAdminOrderById = async (req, res) => {
+    try {
+        const { orderId } = req.params;
+        if (!/^[1-9]\d*$/.test(String(orderId)) || Number(orderId) > 2147483647) {
+            return respondWithError(res, 400, 'Invalid order ID', ERROR_CODES.VALIDATION_ERROR);
+        }
+
+        const parsed = parseOrderDetailQuery(req.query);
+        if (parsed.error) {
+            return respondWithError(res, 400, parsed.error, ERROR_CODES.VALIDATION_ERROR);
+        }
+        const order = await Order.getOrderById(orderId, null, null, { include: parsed.value });
+        if (!order) {
+            return respondWithError(res, 404, 'Order not found', ERROR_CODES.RESOURCE_NOT_FOUND);
+        }
+
+        return respondWithSuccess(res, 200, 'Order fetched successfully', order);
+    } catch (error) {
+        console.error('Error fetching admin order:', error);
+        return respondWithError(res, 500, 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);
     }
 };

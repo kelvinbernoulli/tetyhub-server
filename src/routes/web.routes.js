@@ -262,8 +262,13 @@ router.get(
     OrderController.getCustomerOrders
 );
 router.get(
+    '/orders/view/:orderId',
+    authenticated,
+    isCustomer,
+    OrderController.getCustomerOrderById
+);
+router.get(
     '/orders/:orderId',
-    pagination,
     authenticated,
     isCustomer,
     OrderController.getCustomerOrderById

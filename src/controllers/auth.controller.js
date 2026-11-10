@@ -192,11 +192,22 @@ export const googleAuthCallback = (req, res, next) => {
         passport.authenticate("google", { session: false }, async (err, user) => {
             try {
                 if (err) {
-                    console.error("Google authentication error:", err);
+                    console.error('Google authentication failed:', {
+                        name: err.name,
+                        code: err.code ?? null,
+                    });
                     return res.redirect(`${frontendBase}/login?error=server_error`);
                 }
 
                 if (!user) {
+                    return res.redirect(`${frontendBase}/login?error=google_auth_failed`);
+                }
+
+                if (
+                    ![ROLES.CUSTOMER, ROLES.VENDOR].includes(user.role) ||
+                    user.status !== 'active' ||
+                    user.email_verified !== true
+                ) {
                     return res.redirect(`${frontendBase}/login?error=google_auth_failed`);
                 }
 

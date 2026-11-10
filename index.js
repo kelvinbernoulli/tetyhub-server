@@ -117,7 +117,7 @@ app.post(
 );
 app.post(
     '/v1/api/webhook/shipbubble',
-    express.json({ limit: '1mb' }),
+    express.raw({ type: 'application/json', limit: '1mb' }),
     shipBubbleWebhook
 );
 

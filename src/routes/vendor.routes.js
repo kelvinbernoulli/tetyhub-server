@@ -86,7 +86,7 @@ router.patch('/bookings/:bookingId/cancel', canUpdate('services'), BookingContro
 
 //orders
 router.get("/orders", canRead('orders'), pagination, VendorController.getVendorOrders);
-router.get("/orders/:orderId", canRead('orders'), pagination, VendorController.getVendorOrderById);
+router.get("/orders/:orderId", canRead('orders'), VendorController.getVendorOrderById);
 router.get("/customer-orders", canRead('orders'), pagination, VendorController.getCustomerOrders);
 router.patch("/order/:orderId/update-status", canUpdate('orders'), VendorController.updateOrderStatus);
 router.patch("/order/:orderId/cancel", canUpdate('orders'), VendorController.cancelOrder);

@@ -16,6 +16,7 @@ import * as ReturnController from "#controllers/return.controller.js";
 import * as CategoriesController from '#controllers/categories.controller.js'
 import * as SubcategoriesController from '#controllers/subcategories.controller.js'
 import * as ChildcategoriesController from '#controllers/childcategories.controller.js'
+import * as OrderController from '#controllers/order.controller.js'
 import * as FAQController from '#controllers/faq.controller.js'
 import pagination from "#middlewares/pagination.middleware.js";
 import { Router } from "express";
@@ -114,6 +115,11 @@ router.get(
     pagination,
     ShipbubbleLabelController.getLabelBookingIssues
 );
+
+//orders
+router.get("/orders", canRead('orders'), pagination, OrderController.fetchAllOrders);
+router.get("/orders/view/:orderId", canRead('orders'), OrderController.getAdminOrderById);
+// router.patch("/orders/:orderId/shipbubble-label", canUpdate('orders'), requireRecentAuthentication(), OrderController.updateShipbubbleLabel);
 
 //returns
 router.get("/returns", canRead('returns'), pagination, ReturnController.getAllReturns);

@@ -4,9 +4,45 @@ import pool from '#services/pg_pool.js';
 import Notification from '#models/notification.model.js';
 import { aggregateFulfillmentStatus } from '#services/order-fulfillment.js';
 
+const ORDER_SORT_COLUMNS = {
+    created_at: 'o.created_at',
+    updated_at: 'o.updated_at',
+    total: 'o.total',
+    order_number: 'o.order_number',
+};
+
+const appendOrderFilters = (whereClauses, values, filters = {}, { vendorScope = false, fulfillmentJoin = false } = {}) => {
+    let index = values.length + 1;
+    const add = (clause, value) => {
+        whereClauses.push(clause.replace('?', `$${index++}`));
+        values.push(value);
+    };
+
+    if (filters.order_status) add('o.status = ?', filters.order_status);
+    if (filters.payment_status) add('o.payment_status = ?', filters.payment_status);
+    if (filters.fulfillment_status) {
+        if (fulfillmentJoin) add('vof.status = ?', filters.fulfillment_status);
+        else add('EXISTS (SELECT 1 FROM vendor_order_fulfillments filter_vof WHERE filter_vof.order_id = o.id AND filter_vof.status = ?)', filters.fulfillment_status);
+    }
+    if (filters.from) add('o.created_at >= ?', filters.from);
+    if (filters.to) add('o.created_at <= ?', filters.to);
+    if (filters.q) add('o.order_number ILIKE ?', `%${filters.q}%`);
+    if (filters.vendor_id && !vendorScope) {
+        add('EXISTS (SELECT 1 FROM order_items filter_oi WHERE filter_oi.order_id = o.id AND filter_oi.vendor_id = ?)', filters.vendor_id);
+    }
+
+    return index;
+};
+
+const listOrderFilters = (filters = {}) => ({
+    ...filters,
+    order_status: filters.order_status ?? filters.status,
+});
+
 class Order {
-    static async getOrderById(orderId, userId = null, vendorId = null) {
+    static async getOrderById(orderId, userId = null, vendorId = null, options = {}) {
         try {
+            const include = new Set(options.include ?? ['items', 'shipping_address', 'fulfillments']);
             let paramIndex = 2;
             const whereClauses = [`o.id = $1`];
             const values = [orderId];
@@ -20,7 +56,7 @@ class Order {
                 whereClauses.push(`oi.vendor_id = $${paramIndex++}`);
                 values.push(vendorId);
             }
-            const vendorStatusSelect = vendorId
+            const vendorStatusSelect = vendorId && include.has('fulfillments')
                 ? `vof.status AS vendor_fulfillment_status,
                 vof.gross_amount AS vendor_gross_amount,
                 vof.commission_rate AS vendor_commission_rate,
@@ -35,7 +71,13 @@ class Order {
                 ) ORDER BY vofh.created_at, vofh.id)
                 FROM vendor_order_fulfillment_history vofh
                 WHERE vofh.fulfillment_id = vof.id) AS vendor_fulfillment_history`
-                : `(SELECT json_agg(json_build_object(
+                : vendorId
+                  ? `NULL AS vendor_fulfillment_status, NULL AS vendor_gross_amount,
+                     NULL AS vendor_commission_rate, NULL AS vendor_commission_amount,
+                     NULL AS vendor_net_amount, NULL AS vendor_payout_status,
+                     NULL::json AS vendor_fulfillment_history`
+                  : include.has('fulfillments')
+                    ? `(SELECT json_agg(json_build_object(
                     'vendor_id', vof.vendor_id,
                     'status', vof.status,
                     'items', (SELECT json_agg(jsonb_build_object(
@@ -61,12 +103,13 @@ class Order {
                     WHERE vofh.fulfillment_id = vof.id)
                 ) ORDER BY vof.vendor_id)
                 FROM vendor_order_fulfillments vof WHERE vof.order_id = o.id)
-                AS vendor_fulfillments`;
+                AS vendor_fulfillments`
+                    : 'NULL::json AS vendor_fulfillments';
             const { rows } = await pool.query(
                 `SELECT
                 o.*,
                 ${vendorStatusSelect},
-                json_agg(DISTINCT jsonb_build_object(
+                ${include.has('items') ? `json_agg(DISTINCT jsonb_build_object(
                     'id', oi.id,
                     'product_id', oi.product_id,
                     'product_name', p.name,
@@ -75,8 +118,8 @@ class Order {
                     'quantity', oi.quantity,
                     'price', oi.price,
                     'subtotal', oi.subtotal
-                )) AS items,
-                jsonb_build_object(
+                ))` : 'NULL::json'} AS items,
+                ${include.has('shipping_address') ? `jsonb_build_object(
                     'firstname', oa.firstname,
                     'lastname', oa.lastname,
                     'phone', oa.phone_one,
@@ -85,7 +128,7 @@ class Order {
                     'state', oa.state,
                     'country', oa.country,
                     'zip_code', oa.zip_code
-                ) AS shipping_address
+                )` : 'NULL::jsonb'} AS shipping_address
             FROM orders o
             JOIN order_items oi ON oi.order_id = o.id
             JOIN products p ON p.id = oi.product_id
@@ -105,25 +148,25 @@ class Order {
 
     static async fetchVendorOrders(
         vendorId,
-        { status, payment_status, offset = 0, limit = 40 }
+        { offset = 0, limit = 20, sort_by = 'created_at', sort_order = 'desc', ...rawFilters } = {}
     ) {
         try {
-            let paramIndex = 1;
-            const whereClauses = [
-                `oi.vendor_id = $${paramIndex}`,
-                `vof.vendor_id = $${paramIndex++}`,
-            ];
+            const filters = {
+                ...rawFilters,
+                fulfillment_status: rawFilters.fulfillment_status ?? rawFilters.status,
+            };
+            delete filters.status;
+            const whereClauses = ['vof.vendor_id = $1', 'oi.vendor_id = $1'];
             const values = [vendorId];
-
-            if (status) {
-                whereClauses.push(`vof.status = $${paramIndex++}`);
-                values.push(status);
-            }
-
-            if (payment_status) {
-                whereClauses.push(`o.payment_status = $${paramIndex++}`);
-                values.push(payment_status);
-            }
+            const nextIndex = appendOrderFilters(whereClauses, values, filters, { vendorScope: true, fulfillmentJoin: true });
+            const countResult = await pool.query(
+                `SELECT COUNT(DISTINCT o.id)::int AS total
+                 FROM orders o
+                 JOIN order_items oi ON oi.order_id = o.id
+                 JOIN vendor_order_fulfillments vof ON vof.order_id = o.id AND vof.vendor_id = oi.vendor_id
+                 WHERE ${whereClauses.join(' AND ')}`,
+                values
+            );
 
             const query = `
                 SELECT
@@ -173,13 +216,13 @@ class Order {
                 LEFT JOIN shipping_addresses oa ON oa.order_id = o.id
                 WHERE ${whereClauses.join(' AND ')}
                 GROUP BY o.id, u.id, oa.id, vof.id
-                ORDER BY o.created_at DESC
-                LIMIT $${paramIndex++} OFFSET $${paramIndex++}
+                ORDER BY ${ORDER_SORT_COLUMNS[sort_by] ?? ORDER_SORT_COLUMNS.created_at} ${String(sort_order).toLowerCase() === 'asc' ? 'ASC' : 'DESC'}, o.id DESC
+                LIMIT $${nextIndex} OFFSET $${nextIndex + 1}
             `;
 
             values.push(limit, offset);
             const { rows } = await pool.query(query, values);
-            return rows;
+            return { orders: rows, total: countResult.rows[0]?.total ?? 0 };
         } catch (error) {
             console.error('Error fetching vendor orders:', error);
             throw error;
@@ -189,18 +232,23 @@ class Order {
     // ─── FETCH ALL ORDERS (customer) ──────────────────
     static async fetchCustomerOrders(
         userId,
-        vendorId,
-        { status, offset = 0, limit = 40 }
+        vendorIdOrFilters,
+        maybeFilters
     ) {
         try {
-            let paramIndex = 1;
-            const whereClauses = [`o.user_id = $${paramIndex++}`];
+            // Keep the former (userId, vendorId, filters) call shape for the
+            // vendor-side customer-orders endpoint; vendorId is never used to
+            // determine customer access.
+            const rawFilters = maybeFilters ?? vendorIdOrFilters ?? {};
+            const { offset = 0, limit = 20, sort_by = 'created_at', sort_order = 'desc' } = rawFilters;
+            const filters = listOrderFilters(rawFilters);
+            const whereClauses = ['o.user_id = $1'];
             const values = [userId];
-
-            if (status && status.trim() !== '') {
-                whereClauses.push(`o.status = $${paramIndex++}`);
-                values.push(status);
-            }
+            const nextIndex = appendOrderFilters(whereClauses, values, filters);
+            const countResult = await pool.query(
+                `SELECT COUNT(*)::int AS total FROM orders o WHERE ${whereClauses.join(' AND ')}`,
+                values
+            );
 
             const query = `
                 SELECT
@@ -258,15 +306,64 @@ class Order {
                 LEFT JOIN shipping_addresses oa ON oa.order_id = o.id
                 WHERE ${whereClauses.join(' AND ')}
                 GROUP BY o.id, oa.id
-                ORDER BY o.created_at DESC
-                LIMIT $${paramIndex++} OFFSET $${paramIndex++}
+                ORDER BY ${ORDER_SORT_COLUMNS[sort_by] ?? ORDER_SORT_COLUMNS.created_at} ${String(sort_order).toLowerCase() === 'asc' ? 'ASC' : 'DESC'}, o.id DESC
+                LIMIT $${nextIndex} OFFSET $${nextIndex + 1}
             `;
 
             values.push(limit, offset);
             const { rows } = await pool.query(query, values);
-            return rows;
+            return { orders: rows, total: countResult.rows[0]?.total ?? 0 };
         } catch (error) {
             console.error('Error fetching customer orders:', error);
+            throw error;
+        }
+    }
+
+    static async fetchAllOrders({ offset = 0, limit = 20, sort_by = 'created_at', sort_order = 'desc', ...rawFilters } = {}) {
+        try {
+            const filters = listOrderFilters(rawFilters);
+            const whereClauses = ['TRUE'];
+            const values = [];
+            const nextIndex = appendOrderFilters(whereClauses, values, filters);
+            const countResult = await pool.query(
+                `SELECT COUNT(DISTINCT o.id)::int AS total FROM orders o WHERE ${whereClauses.join(' AND ')}`,
+                values
+            );
+            const { rows } = await pool.query(
+                `SELECT o.*,
+                    u.firstname AS customer_firstname,
+                    u.lastname AS customer_lastname,
+                    u.email AS customer_email,
+                    (SELECT json_agg(jsonb_build_object(
+                        'id', oi.id, 'vendor_id', oi.vendor_id, 'product_id', oi.product_id,
+                        'product_name', p.name, 'thumbnail', p.thumbnail,
+                        'variant_id', oi.variant_id, 'quantity', oi.quantity,
+                        'price', oi.price, 'subtotal', oi.subtotal
+                    ) ORDER BY oi.id)
+                     FROM order_items oi JOIN products p ON p.id = oi.product_id
+                     WHERE oi.order_id = o.id) AS items,
+                    (SELECT json_agg(jsonb_build_object(
+                        'vendor_id', vof.vendor_id, 'status', vof.status,
+                        'gross_amount', vof.gross_amount, 'commission_amount', vof.commission_amount,
+                        'net_amount', vof.net_amount, 'payout_status', vof.payout_status
+                    ) ORDER BY vof.vendor_id)
+                     FROM vendor_order_fulfillments vof WHERE vof.order_id = o.id) AS vendor_fulfillments,
+                    jsonb_build_object(
+                        'firstname', oa.firstname, 'lastname', oa.lastname,
+                        'phone', oa.phone_one, 'address', oa.address, 'city', oa.city,
+                        'state', oa.state, 'country', oa.country, 'zip_code', oa.zip_code
+                    ) AS shipping_address
+                 FROM orders o
+                 JOIN users u ON u.id = o.user_id
+                 LEFT JOIN shipping_addresses oa ON oa.order_id = o.id
+                 WHERE ${whereClauses.join(' AND ')}
+                 ORDER BY ${ORDER_SORT_COLUMNS[sort_by] ?? ORDER_SORT_COLUMNS.created_at} ${String(sort_order).toLowerCase() === 'asc' ? 'ASC' : 'DESC'}, o.id DESC
+                 LIMIT $${nextIndex} OFFSET $${nextIndex + 1}`,
+                [...values, limit, offset]
+            );
+            return { orders: rows, total: countResult.rows[0]?.total ?? 0 };
+        } catch (error) {
+            console.error('Error fetching all orders:', error);
             throw error;
         }
     }
