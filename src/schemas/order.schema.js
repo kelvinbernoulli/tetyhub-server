@@ -62,8 +62,14 @@ export const addTrackingUpdateSchema = Joi.object({
 export const createReturnRequestSchema = Joi.object({
     reason: Joi.string().trim().max(500).required().label("Return Reason"),
     description: Joi.string().trim().max(1000).optional().label("Description"),
-    return_type: Joi.string().valid('refund', 'exchange', 'store_credit').required().label("Return Type"),
-    refund_amount: Joi.number().min(0).optional().label("Refund Amount"),
+    reason_type: Joi.string().valid(
+        'change_of_mind',
+        'defective_or_unsafe',
+        'wrong_item',
+        'misdescribed',
+        'unsuitable_for_stated_purpose'
+    ).required().label("Return Reason Type"),
+    return_type: Joi.string().valid('refund').default('refund').label("Return Type"),
     items: Joi.array().items(
         Joi.object({
             order_item_id: Joi.number().integer().positive().required().label("Order Item ID"),
@@ -71,7 +77,7 @@ export const createReturnRequestSchema = Joi.object({
             condition: Joi.string().trim().max(255).optional().label("Item Condition"),
         })
     ).min(1).required().label("Return Items"),
-});
+  }).unknown(false).required();
 
 export const updateReturnStatusSchema = Joi.object({
     status: Joi.string().valid('pending', 'approved', 'rejected', 'awaiting_pickup', 'item_received', 'processing', 'completed', 'cancelled').required().label("Return Status"),

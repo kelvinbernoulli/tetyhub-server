@@ -14,12 +14,12 @@ export const createReturnRequest = async (req, res) => {
 
         const { orderId } = params;
 
-        const { error } = createReturnRequestSchema.validate(body);
+        const { error, value } = createReturnRequestSchema.validate(body ?? {}, { abortEarly: false, stripUnknown: true });
         if (error) {
-            return respondWithError(res, 400, error.details[0].message, ERROR_CODES.VALIDATION_ERROR);
+            return respondWithError(res, 400, error.details.map((detail) => detail.message).join(', '), ERROR_CODES.VALIDATION_ERROR);
         }
 
-        const result = await Return.createReturnRequest(orderId, user.id, body);
+        const result = await Return.createReturnRequest(orderId, user.id, value);
         if (result?.error) {
             return respondWithError(res, result.code, result.error, ERROR_CODES.VALIDATION_ERROR);
         }
@@ -27,7 +27,7 @@ export const createReturnRequest = async (req, res) => {
         return respondWithSuccess(res, 201, 'Return request created successfully', result);
     } catch (error) {
         console.error("Error creating return request:", error);
-        return respondWithError(res, 500, error.message || 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);
+        return respondWithError(res, 500, 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);
     }
 };
 
@@ -55,7 +55,7 @@ export const updateReturnStatus = async (req, res) => {
         return respondWithSuccess(res, 200, 'Return status updated successfully', result);
     } catch (error) {
         console.error("Error updating return status:", error);
-        return respondWithError(res, 500, error.message || 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);
+        return respondWithError(res, 500, 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);
     }
 };
 
@@ -70,7 +70,11 @@ export const getReturnById = async (req, res) => {
 
         const { returnId } = params;
 
-        const returnRequest = await Return.getReturnById(returnId, user.id, user.vendor_id);
+        const returnRequest = await Return.getReturnById(
+            returnId,
+            user.role === 'customer' ? user.id : null,
+            user.role === 'vendor' ? user.vendor_id : null
+        );
 
         if (!returnRequest) {
             return respondWithError(res, 404, 'Return request not found', ERROR_CODES.RESOURCE_NOT_FOUND);
@@ -79,7 +83,7 @@ export const getReturnById = async (req, res) => {
         return respondWithSuccess(res, 200, 'Return request fetched successfully', returnRequest);
     } catch (error) {
         console.error("Error fetching return request:", error);
-        return respondWithError(res, 500, error.message || 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);
+        return respondWithError(res, 500, 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);
     }
 };
 
@@ -94,12 +98,12 @@ export const getReturnsByOrderId = async (req, res) => {
 
         const { orderId } = params;
 
-        const returns = await Return.getReturnsByOrderId(orderId, user.id, user.vendor_id);
+        const returns = await Return.getReturnsByOrderId(orderId, user.id);
 
         return respondWithSuccess(res, 200, 'Returns fetched successfully', returns);
     } catch (error) {
         console.error("Error fetching returns:", error);
-        return respondWithError(res, 500, error.message || 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);
+        return respondWithError(res, 500, 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);
     }
 };
 
@@ -120,7 +124,7 @@ export const getVendorReturns = async (req, res) => {
         return respondWithSuccess(res, 200, 'Returns fetched successfully', returns);
     } catch (error) {
         console.error("Error fetching vendor returns:", error);
-        return respondWithError(res, 500, error.message || 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);
+        return respondWithError(res, 500, 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);
     }
 };
 
@@ -136,12 +140,12 @@ export const getCustomerReturns = async (req, res) => {
         const { offset, limit } = pagination;
         const { status } = query;
 
-        const returns = await Return.getCustomerReturns(user.id, user.vendor_id, { status, offset, limit });
+        const returns = await Return.getCustomerReturns(user.id, { status, offset, limit });
 
         return respondWithSuccess(res, 200, 'Returns fetched successfully', returns);
     } catch (error) {
         console.error("Error fetching customer returns:", error);
-        return respondWithError(res, 500, error.message || 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);
+        return respondWithError(res, 500, 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);
     }
 };
 
@@ -169,7 +173,7 @@ export const adminUpdateReturn = async (req, res) => {
         return respondWithSuccess(res, 200, 'Return updated successfully', result);
     } catch (error) {
         console.error("Error updating return by admin:", error);
-        return respondWithError(res, 500, error.message || 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);
+        return respondWithError(res, 500, 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);
     }
 };
 
@@ -190,6 +194,6 @@ export const getAllReturns = async (req, res) => {
         return respondWithSuccess(res, 200, 'Returns fetched successfully', returns);
     } catch (error) {
         console.error("Error fetching all returns:", error);
-        return respondWithError(res, 500, error.message || 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);
+        return respondWithError(res, 500, 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);
     }
 };

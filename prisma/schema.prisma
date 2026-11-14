@@ -1272,6 +1272,7 @@ model PaystackWebhookEvent {
   eventKey         String    @unique @map("event_key")
   eventType        String    @map("event_type")
   reference        String?
+  refundReference  String?   @map("refund_reference")
   transactionId    String?   @map("transaction_id")
   subscriptionCode String?   @map("subscription_code")
   customerCode     String?   @map("customer_code")

@@ -78,17 +78,21 @@ export const initializeStripe = ({
     );
 export const verifyStripe = (reference) =>
     stripeClient().paymentIntents.retrieve(reference);
-export const refundPaystack = async ({ reference, amount, merchant_note }) =>
+export const refundPaystack = async ({ reference, amount, merchant_note, refundReference }) =>
     (
         await paystack.post('/refund', {
             transaction: reference,
             amount: minorUnits(amount),
             merchant_note,
+            reference: refundReference,
         })
     ).data;
-export const refundStripe = ({ paymentIntentId, amount, reason }) =>
+export const getPaystackRefundByReference = async (refundReference) =>
+    (await paystack.get('/refund', { params: { reference: refundReference } })).data;
+export const refundStripe = ({ paymentIntentId, amount, reason, refundReference }) =>
     stripeClient().refunds.create({
         payment_intent: paymentIntentId,
         amount: minorUnits(amount),
         reason: reason ?? 'requested_by_customer',
-    });
+        metadata: { refund_reference: refundReference },
+    }, { idempotencyKey: refundReference });

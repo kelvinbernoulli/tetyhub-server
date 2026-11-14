@@ -1,4 +1,4 @@
-import { notifyOrder, notifyPaymentFailure } from '#services/notifications.js';
+import { notifyOrder, notifyPaymentFailure, notifyReturn } from '#services/notifications.js';
 import { recordProductSale } from '#services/marketplace-ledger.js';
 import BookingPayment from '#models/booking-payment.model.js';
 import { randomUUID } from 'node:crypto';
@@ -305,6 +305,183 @@ export class Payment {
             await notifyOrder(client, order, status);
             return { order_id: order.id, payment_status: 'paid', status };
         });
+    }
+
+    static async processReturnRefund(returnId) {
+        const refund = await transaction(pool, async (client) => {
+            const result = await client.query(
+                `SELECT r.*, o.payment_status, o.currency_id,
+                        p.id AS payment_id, p.gateway, p.gateway_ref, p.provider_ref,
+                        p.status AS payment_status_record, p.amount AS payment_amount
+                 FROM returns r
+                 JOIN orders o ON o.id = r.order_id
+                 JOIN payments p ON p.order_id = o.id AND p.status = 'success'
+                 WHERE r.id = $1
+                 ORDER BY p.id DESC LIMIT 1
+                 FOR UPDATE OF r, p`,
+                [returnId]
+            );
+            const record = result.rows[0];
+            if (!record) throw new CheckoutError('Successful payment for this return was not found', 409);
+            if (record.payment_status !== 'paid' || record.return_type !== 'refund')
+                throw new CheckoutError('This return is not eligible for a payment refund', 409);
+            if (!['processing', 'completed'].includes(record.status))
+                throw new CheckoutError('Returned item must be received before refund processing', 409);
+
+            let existing = (await client.query(
+                'SELECT * FROM order_refunds WHERE return_id = $1 FOR UPDATE',
+                [returnId]
+            )).rows[0];
+            if (existing?.status === 'processed') return { ...existing, alreadyProcessed: true };
+
+            const prior = await client.query(
+                `SELECT COALESCE(SUM(amount), 0)::numeric AS total
+                 FROM order_refunds WHERE payment_id = $1 AND status <> 'failed' AND return_id <> $2`,
+                [record.payment_id, returnId]
+            );
+            const amount = Number(record.refund_amount);
+            if (!Number.isFinite(amount) || amount <= 0 ||
+                Number(prior.rows[0].total) + amount > Number(record.payment_amount) + 0.005) {
+                throw new CheckoutError('Refund amount exceeds the remaining paid balance', 409);
+            }
+
+            if (!existing) {
+                const refundReference = `ret-${returnId}-${randomUUID()}`;
+                existing = (await client.query(
+                    `INSERT INTO order_refunds
+                     (return_id, payment_id, gateway, transaction_reference,
+                      refund_reference, amount, currency_id, status)
+                     VALUES ($1,$2,$3,$4,$5,$6,$7,'queued') RETURNING *`,
+                    [returnId, record.payment_id, record.gateway,
+                        record.provider_ref || record.gateway_ref, refundReference,
+                        amount, record.currency_id]
+                )).rows[0];
+            }
+            await client.query(
+                `UPDATE returns SET refund_status = 'queued', refund_reference = $2,
+                    refund_amount = $3, updated_at = NOW() WHERE id = $1`,
+                [returnId, existing.refund_reference, existing.amount]
+            );
+            return existing;
+        });
+
+        if (refund.alreadyProcessed) return refund;
+
+        try {
+            let providerData;
+            if (refund.gateway === 'paystack') {
+                if (refund.status === 'queued' && refund.provider_ref) {
+                    const response = await Payment.gatewayApi.getPaystackRefundByReference(refund.refund_reference);
+                    const candidates = Array.isArray(response?.data) ? response.data : [response?.data];
+                    providerData = candidates.find((entry) =>
+                        entry && (entry.reference === refund.refund_reference || String(entry.id) === refund.provider_ref)
+                    );
+                    if (!providerData) return refund;
+                } else try {
+                    const response = await Payment.gatewayApi.refundPaystack({
+                        reference: refund.transaction_reference,
+                        amount: refund.amount,
+                        merchant_note: `Approved product return ${returnId}`,
+                        refundReference: refund.refund_reference,
+                    });
+                    providerData = response?.data ?? response;
+                } catch (error) {
+                    if (error.response?.status !== 409) throw error;
+                    const response = await Payment.gatewayApi.getPaystackRefundByReference(refund.refund_reference);
+                    const existing = Array.isArray(response?.data)
+                        ? response.data.find((entry) => entry.reference === refund.refund_reference)
+                        : response?.data;
+                    if (!existing) throw error;
+                    providerData = existing;
+                }
+            } else if (refund.gateway === 'stripe') {
+                providerData = refund.status === 'queued' && refund.provider_ref
+                    ? await Payment.gatewayApi.stripeClient().refunds.retrieve(refund.provider_ref)
+                    : await Payment.gatewayApi.refundStripe({
+                        paymentIntentId: refund.transaction_reference,
+                        amount: refund.amount,
+                        refundReference: refund.refund_reference,
+                        reason: 'requested_by_customer',
+                    });
+            } else {
+                throw new CheckoutError('Unsupported payment gateway for refunds', 422);
+            }
+            const status = providerData?.status === 'processed' || providerData?.status === 'succeeded'
+                ? 'processed'
+                : providerData?.status === 'failed' || providerData?.status === 'canceled'
+                  ? 'failed'
+                  : 'queued';
+            const providerRef = String(providerData?.id ?? providerData?.reference ?? refund.refund_reference);
+            await transaction(pool, async (client) => {
+                await client.query(
+                    `UPDATE order_refunds SET provider_ref = $2, status = $3,
+                        last_error = NULL, updated_at = NOW(),
+                        processed_at = CASE WHEN $3 = 'processed' THEN NOW() ELSE processed_at END
+                     WHERE id = $1`,
+                    [refund.id, providerRef, status]
+                );
+                await client.query(
+                    `UPDATE returns SET refund_status = $2,
+                        refund_processed_at = CASE WHEN $2 = 'processed' THEN NOW() ELSE refund_processed_at END,
+                        updated_at = NOW() WHERE id = $1`,
+                    [returnId, status]
+                );
+                if (status === 'processed') {
+                    const completed = await client.query(
+                        `UPDATE returns SET status = 'completed', completed_at = NOW(), updated_at = NOW()
+                         WHERE id = $1 AND status = 'processing' RETURNING *`, [returnId]
+                    );
+                    if (completed.rows[0]) await notifyReturn(client, completed.rows[0], 'completed');
+                    await client.query(
+                        `UPDATE orders o SET
+                             status = CASE WHEN
+                                 (SELECT COALESCE(SUM(rf.amount), 0) FROM order_refunds rf
+                                  JOIN payments p ON p.id = rf.payment_id
+                                  WHERE p.order_id = o.id AND rf.status = 'processed') >=
+                                 (SELECT COALESCE(SUM(p.amount), 0) FROM payments p
+                                  WHERE p.order_id = o.id AND p.status = 'success')
+                                 THEN 'refunded' ELSE o.status END,
+                             payment_status = CASE WHEN
+                                 (SELECT COALESCE(SUM(rf.amount), 0) FROM order_refunds rf
+                                  JOIN payments p ON p.id = rf.payment_id
+                                  WHERE p.order_id = o.id AND rf.status = 'processed') >=
+                                 (SELECT COALESCE(SUM(p.amount), 0) FROM payments p
+                                  WHERE p.order_id = o.id AND p.status = 'success')
+                                 THEN 'refunded' ELSE 'partially_refunded' END,
+                             updated_at = NOW()
+                         WHERE o.id = (SELECT order_id FROM returns WHERE id = $1)
+                           AND EXISTS (SELECT 1 FROM order_refunds rf
+                                       WHERE rf.return_id = $1 AND rf.status = 'processed')`, [returnId]
+                    );
+                }
+            });
+            return { ...refund, status, provider_ref: providerRef };
+        } catch (error) {
+            // Keep the provider reference stable: retrying the same refund is idempotent.
+            await pool.query(
+                `UPDATE order_refunds SET last_error = $2, updated_at = NOW()
+                 WHERE id = $1`,
+                [refund.id, String(error.message ?? 'Refund request failed').slice(0, 500)]
+            );
+            throw error;
+        }
+    }
+
+    static async reconcileReturnRefunds(limit = 25) {
+        const { rows } = await pool.query(
+            `SELECT return_id FROM order_refunds
+             WHERE status = 'queued' AND updated_at < NOW() - INTERVAL '30 seconds'
+             ORDER BY updated_at ASC LIMIT $1`,
+            [limit]
+        );
+        for (const { return_id: returnId } of rows) {
+            try {
+                await Payment.processReturnRefund(returnId);
+            } catch (error) {
+                console.error(`Return refund reconciliation failed for return ${returnId}:`, error.message);
+            }
+        }
+        return rows.length;
     }
 
     // The legacy refund implementation could mark unissued store credit as refunded and

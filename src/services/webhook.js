@@ -5,6 +5,7 @@ import SubscriptionService from '#services/subscription.service.js';
 import pool from '#services/pg_pool.js';
 import { transaction } from '#utils/checkout.js';
 import { stripeClient } from '#utils/payment.js';
+import { notifyReturn } from '#services/notifications.js';
 
 const PAYSTACK_EVENTS = new Set([
     'charge.success',
@@ -14,6 +15,11 @@ const PAYSTACK_EVENTS = new Set([
     'subscription.create',
     'subscription.disable',
     'subscription.not_renew',
+    'refund.pending',
+    'refund.processing',
+    'refund.needs-attention',
+    'refund.failed',
+    'refund.processed',
 ]);
 
 export async function paystackWebhook(req, res) {
@@ -44,6 +50,8 @@ export async function paystackWebhook(req, res) {
                 : null;
         const reference =
             typeof data.reference === 'string' ? data.reference : null;
+        const refundReference =
+            typeof data.refund_reference === 'string' ? data.refund_reference : null;
         const subscriptionCode =
             data.subscription?.subscription_code ??
             data.subscription_code ??
@@ -60,14 +68,15 @@ export async function paystackWebhook(req, res) {
 
         await pool.query(
             `INSERT INTO paystack_webhook_events
-                (event_key, event_type, reference, transaction_id,
+                (event_key, event_type, reference, refund_reference, transaction_id,
                  subscription_code, customer_code, event_status)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
              ON CONFLICT (event_key) DO NOTHING`,
             [
                 `${eventType}:${identifier}`,
                 eventType,
                 reference,
+                refundReference,
                 transactionId,
                 subscriptionCode,
                 customerCode,
@@ -82,6 +91,62 @@ export async function paystackWebhook(req, res) {
 }
 
 export async function processPaystackEvent(event) {
+    if (event.event_type.startsWith('refund.')) {
+        if (!event.refund_reference) {
+            console.warn('Paystack refund event did not include a refund reference:', event.event_key);
+            return;
+        }
+        const refundStatus = event.event_type === 'refund.processed'
+            ? 'processed'
+            : event.event_type === 'refund.failed'
+              ? 'failed'
+              : 'queued';
+        await transaction(pool, async (client) => {
+            const { rows } = await client.query(
+                `UPDATE order_refunds SET status = $2, last_error = NULL,
+                    updated_at = NOW(),
+                    processed_at = CASE WHEN $2 = 'processed' THEN NOW() ELSE processed_at END
+                 WHERE refund_reference = $1 RETURNING return_id`,
+                [event.refund_reference, refundStatus]
+            );
+            if (!rows[0]) return;
+            const changed = await client.query(
+                `UPDATE returns SET refund_status = $2,
+                    refund_processed_at = CASE WHEN $2 = 'processed' THEN NOW() ELSE refund_processed_at END,
+                    status = CASE WHEN $2 = 'processed' AND status = 'processing' THEN 'completed' ELSE status END,
+                    completed_at = CASE WHEN $2 = 'processed' AND status = 'processing' THEN NOW() ELSE completed_at END,
+                    updated_at = NOW()
+                 WHERE id = $1 AND refund_status IS DISTINCT FROM $2 RETURNING *`,
+                [rows[0].return_id, refundStatus]
+            );
+            if (changed.rows[0]) await notifyReturn(client, changed.rows[0], changed.rows[0].status);
+            if (refundStatus === 'processed') {
+                await client.query(
+                    `UPDATE orders o SET
+                         status = CASE WHEN
+                             (SELECT COALESCE(SUM(rf.amount), 0) FROM order_refunds rf
+                              JOIN payments p ON p.id = rf.payment_id
+                              WHERE p.order_id = o.id AND rf.status = 'processed') >=
+                             (SELECT COALESCE(SUM(p.amount), 0) FROM payments p
+                              WHERE p.order_id = o.id AND p.status = 'success')
+                             THEN 'refunded' ELSE o.status END,
+                         payment_status = CASE WHEN
+                             (SELECT COALESCE(SUM(rf.amount), 0) FROM order_refunds rf
+                              JOIN payments p ON p.id = rf.payment_id
+                              WHERE p.order_id = o.id AND rf.status = 'processed') >=
+                             (SELECT COALESCE(SUM(p.amount), 0) FROM payments p
+                              WHERE p.order_id = o.id AND p.status = 'success')
+                             THEN 'refunded' ELSE 'partially_refunded' END,
+                         updated_at = NOW()
+                     WHERE o.id = (SELECT order_id FROM returns WHERE id = $1)
+                       AND EXISTS (SELECT 1 FROM order_refunds rf
+                                   WHERE rf.return_id = $1 AND rf.status = 'processed')`,
+                    [rows[0].return_id]
+                );
+            }
+        });
+        return;
+    }
     if (event.event_type === 'charge.success') {
         if (!event.reference)
             throw new Error('Paystack charge event has no reference');
@@ -207,6 +272,36 @@ export async function stripeWebhook(req, res) {
     try {
         if (event.type === 'payment_intent.succeeded')
             await Payment.settle('stripe', event.data.object, event.id);
+        if (event.type === 'refund.updated') {
+            const refund = event.data.object;
+            const reference = refund.metadata?.refund_reference;
+            if (reference) {
+                const status = refund.status === 'succeeded'
+                    ? 'processed'
+                    : refund.status === 'failed' || refund.status === 'canceled'
+                      ? 'failed'
+                      : 'queued';
+                await transaction(pool, async (client) => {
+                    const { rows } = await client.query(
+                        `UPDATE order_refunds SET status = $2, provider_ref = $3,
+                            updated_at = NOW(),
+                            processed_at = CASE WHEN $2 = 'processed' THEN NOW() ELSE processed_at END
+                         WHERE refund_reference = $1 RETURNING return_id`,
+                        [reference, status, refund.id]
+                    );
+                    if (!rows[0]) return;
+                    const changed = await client.query(
+                        `UPDATE returns SET refund_status = $2,
+                            refund_processed_at = CASE WHEN $2 = 'processed' THEN NOW() ELSE refund_processed_at END,
+                            status = CASE WHEN $2 = 'processed' AND status = 'processing' THEN 'completed' ELSE status END,
+                            completed_at = CASE WHEN $2 = 'processed' AND status = 'processing' THEN NOW() ELSE completed_at END,
+                            updated_at = NOW() WHERE id = $1 AND refund_status IS DISTINCT FROM $2 RETURNING *`,
+                        [rows[0].return_id, status]
+                    );
+                    if (changed.rows[0]) await notifyReturn(client, changed.rows[0], changed.rows[0].status);
+                });
+            }
+        }
         return res.sendStatus(200);
     } catch (error) {
         console.error('Stripe webhook processing failed:', error.message);

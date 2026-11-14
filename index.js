@@ -25,6 +25,7 @@ import {
 import { startShipbubbleLabelWorker } from '#services/shipbubble-label.worker.js';
 import { startShipbubbleTrackingWorker } from '#services/shipbubble-tracking.worker.js';
 import { startCheckoutWorker } from '#services/checkout.worker.js';
+import { startReturnRefundWorker } from '#services/return-refund.worker.js';
 import { startSubscriptionLifecycleJob } from '#services/subscription-lifecycle.service.js';
 import passport from 'passport';
 import pool from '#services/pg_pool.js';
@@ -222,6 +223,7 @@ app.use((err, req, res, next) => {
 });
 
 const stopCheckoutWorker = startCheckoutWorker();
+const stopReturnRefundWorker = startReturnRefundWorker();
 const stopPaystackWebhookWorker = startPaystackWebhookWorker();
 const stopSubscriptionLifecycleJob = startSubscriptionLifecycleJob();
 const stopShipbubbleLabelWorker = startShipbubbleLabelWorker();
@@ -237,6 +239,7 @@ const shutdown = (signal) => {
     shuttingDown = true;
     console.log(`${signal} received: closing server and background workers`);
     stopCheckoutWorker();
+    stopReturnRefundWorker();
     stopPaystackWebhookWorker();
     stopSubscriptionLifecycleJob();
     stopShipbubbleLabelWorker();
