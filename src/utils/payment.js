@@ -1,12 +1,5 @@
-import Stripe from 'stripe';
 import paystack from '#config/paystack.js';
 import { minorUnits } from './checkout.js';
-let stripe;
-export const stripeClient = () =>
-    (stripe ??= new Stripe(process.env.STRIPE_SECRET_KEY, {
-        timeout: 15000,
-        maxNetworkRetries: 1,
-    }));
 export async function initializePaystack({
     email,
     amount,
@@ -60,24 +53,6 @@ export async function disablePaystackSubscription({
         throw new Error('Paystack subscription cancellation failed');
     return data.data;
 }
-export const initializeStripe = ({
-    email,
-    amount,
-    currency,
-    reference,
-    metadata,
-}) =>
-    stripeClient().paymentIntents.create(
-        {
-            amount: minorUnits(amount),
-            currency: currency.toLowerCase(),
-            receipt_email: email,
-            metadata,
-        },
-        { idempotencyKey: reference }
-    );
-export const verifyStripe = (reference) =>
-    stripeClient().paymentIntents.retrieve(reference);
 export const refundPaystack = async ({ reference, amount, merchant_note, refundReference }) =>
     (
         await paystack.post('/refund', {
@@ -89,10 +64,42 @@ export const refundPaystack = async ({ reference, amount, merchant_note, refundR
     ).data;
 export const getPaystackRefundByReference = async (refundReference) =>
     (await paystack.get('/refund', { params: { reference: refundReference } })).data;
-export const refundStripe = ({ paymentIntentId, amount, reason, refundReference }) =>
-    stripeClient().refunds.create({
-        payment_intent: paymentIntentId,
-        amount: minorUnits(amount),
-        reason: reason ?? 'requested_by_customer',
-        metadata: { refund_reference: refundReference },
-    }, { idempotencyKey: refundReference });
+
+export async function createPaystackTransferRecipient({ name, accountNumber, bankCode, currency = 'NGN' }) {
+    const { data } = await paystack.post('/transferrecipient', {
+        type: 'nuban',
+        name,
+        account_number: accountNumber,
+        bank_code: bankCode,
+        currency,
+    });
+    if (!data.status || !data.data?.recipient_code)
+        throw new Error('Paystack recipient creation failed');
+    return data.data;
+}
+
+export async function initiatePaystackTransfer({ amountMinor, recipientCode, reference, currency, reason }) {
+    if (!Number.isSafeInteger(amountMinor) || amountMinor <= 0)
+        throw new Error('Transfer amount must be a positive integer in minor units');
+    const { data } = await paystack.post('/transfer', {
+        source: 'balance',
+        amount: amountMinor,
+        recipient: recipientCode,
+        reference,
+        currency,
+        reason,
+    });
+    if (!data.status || !data.data)
+        throw new Error(data.message || 'Paystack transfer initiation failed');
+    return data.data;
+}
+
+export async function finalizePaystackTransfer({ transferCode, otp }) {
+    const { data } = await paystack.post('/transfer/finalize_transfer', {
+        transfer_code: transferCode,
+        otp,
+    });
+    if (!data.status || !data.data)
+        throw new Error(data.message || 'Paystack transfer finalization failed');
+    return data.data;
+}

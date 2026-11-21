@@ -18,7 +18,6 @@ import vendor from '#routes/vendor.routes.js';
 import web from '#routes/web.routes.js';
 import {
     paystackWebhook,
-    stripeWebhook,
     shipBubbleWebhook,
     startPaystackWebhookWorker,
 } from '#services/webhook.js';
@@ -26,6 +25,8 @@ import { startShipbubbleLabelWorker } from '#services/shipbubble-label.worker.js
 import { startShipbubbleTrackingWorker } from '#services/shipbubble-tracking.worker.js';
 import { startCheckoutWorker } from '#services/checkout.worker.js';
 import { startReturnRefundWorker } from '#services/return-refund.worker.js';
+import { startVendorDeliveryConfirmationWorker } from '#services/vendor-delivery-confirmation.worker.js';
+import { startVendorPayoutWorker } from '#services/vendor-payout.worker.js';
 import { startSubscriptionLifecycleJob } from '#services/subscription-lifecycle.service.js';
 import passport from 'passport';
 import pool from '#services/pg_pool.js';
@@ -114,11 +115,6 @@ app.post(
     '/v1/api/webhook/paystack',
     express.raw({ type: 'application/json', limit: '1mb' }),
     paystackWebhook
-);
-app.post(
-    '/v1/api/webhook/stripe',
-    express.raw({ type: 'application/json', limit: '1mb' }),
-    stripeWebhook
 );
 app.post(
     '/v1/api/webhook/shipbubble',
@@ -224,6 +220,8 @@ app.use((err, req, res, next) => {
 
 const stopCheckoutWorker = startCheckoutWorker();
 const stopReturnRefundWorker = startReturnRefundWorker();
+const stopVendorDeliveryConfirmationWorker = startVendorDeliveryConfirmationWorker();
+const stopVendorPayoutWorker = startVendorPayoutWorker();
 const stopPaystackWebhookWorker = startPaystackWebhookWorker();
 const stopSubscriptionLifecycleJob = startSubscriptionLifecycleJob();
 const stopShipbubbleLabelWorker = startShipbubbleLabelWorker();
@@ -240,6 +238,7 @@ const shutdown = (signal) => {
     console.log(`${signal} received: closing server and background workers`);
     stopCheckoutWorker();
     stopReturnRefundWorker();
+    stopVendorDeliveryConfirmationWorker();
     stopPaystackWebhookWorker();
     stopSubscriptionLifecycleJob();
     stopShipbubbleLabelWorker();

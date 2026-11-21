@@ -1,5 +1,6 @@
 import Joi from "joi";
 import { shipmentTransitions } from "#services/shipment.js";
+import { normalizeReturnRequest, requiresReturnEvidence } from "#utils/return-policy.js";
 
 export const orderSchema = Joi.object({
     note: Joi.string().trim().max(500).optional().label("Order Note"),
@@ -64,12 +65,33 @@ export const createReturnRequestSchema = Joi.object({
     description: Joi.string().trim().max(1000).optional().label("Description"),
     reason_type: Joi.string().valid(
         'change_of_mind',
+        'vendor_fault',
         'defective_or_unsafe',
         'wrong_item',
         'misdescribed',
         'unsuitable_for_stated_purpose'
     ).required().label("Return Reason Type"),
     return_type: Joi.string().valid('refund').default('refund').label("Return Type"),
+    evidence: Joi.array().items(
+        Joi.alternatives().try(
+            Joi.string().uri({ scheme: ['http', 'https'] }),
+            Joi.object({
+                type: Joi.string().valid('image', 'video', 'document').default('image'),
+                url: Joi.string().uri({ scheme: ['http', 'https'] }).required(),
+                description: Joi.string().trim().max(255).optional(),
+            })
+        )
+    ).min(1).max(10).when('reason_type', {
+        is: Joi.valid(
+            'vendor_fault',
+            'defective_or_unsafe',
+            'wrong_item',
+            'misdescribed',
+            'unsuitable_for_stated_purpose'
+        ),
+        then: Joi.required(),
+        otherwise: Joi.optional(),
+    }).label("Evidence"),
     items: Joi.array().items(
         Joi.object({
             order_item_id: Joi.number().integer().positive().required().label("Order Item ID"),
@@ -77,7 +99,14 @@ export const createReturnRequestSchema = Joi.object({
             condition: Joi.string().trim().max(255).optional().label("Item Condition"),
         })
     ).min(1).required().label("Return Items"),
-  }).unknown(false).required();
+  }).unknown(false).required().custom((value, helpers) => {
+      const normalized = normalizeReturnRequest(value);
+      if (requiresReturnEvidence(normalized.reason_type) && !normalized.evidence?.length)
+          return helpers.error('any.custom');
+      return normalized;
+  }).messages({
+      'any.custom': 'Evidence is required for merchant or fulfillment error returns',
+  });
 
 export const updateReturnStatusSchema = Joi.object({
     status: Joi.string().valid('pending', 'approved', 'rejected', 'awaiting_pickup', 'item_received', 'processing', 'completed', 'cancelled').required().label("Return Status"),

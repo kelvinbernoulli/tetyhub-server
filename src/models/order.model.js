@@ -39,6 +39,37 @@ const listOrderFilters = (filters = {}) => ({
     order_status: filters.order_status ?? filters.status,
 });
 
+async function availableVendorBalance(client, vendorId, currencyId) {
+    const { rows: [ledger] } = await client.query(
+        `SELECT COALESCE(SUM(amount), 0)::numeric AS balance
+         FROM ledger_entries WHERE vendor_id = $1 AND currency_id = $2`,
+        [vendorId, currencyId]
+    );
+    const { rows: [reserved] } = await client.query(
+        `SELECT COALESCE(SUM(amount), 0)::numeric AS amount
+         FROM vendor_payouts
+         WHERE vendor_id = $1 AND currency_id = $2 AND status IN ('pending', 'processing')`,
+        [vendorId, currencyId]
+    );
+    return Math.max(
+        0,
+        Math.round((Number(ledger.balance) - Number(reserved.amount)) * 100) / 100
+    );
+}
+
+async function releasePayoutHold(client, fulfillmentId, metadata = {}) {
+    await client.query(
+        `INSERT INTO vendor_ledger_entries
+         (vendor_id, order_id, fulfillment_id, currency_id, entry_type, amount_minor, idempotency_key, metadata)
+         SELECT vendor_id, order_id, fulfillment_id, currency_id, 'payout_hold_release', -amount_minor,
+                'delivery:' || fulfillment_id || ':payout-hold-release', $2::jsonb
+         FROM vendor_ledger_entries
+         WHERE fulfillment_id = $1 AND entry_type = 'payout_hold' AND amount_minor < 0
+         ON CONFLICT (idempotency_key) DO NOTHING`,
+        [fulfillmentId, JSON.stringify(metadata)]
+    );
+}
+
 class Order {
     static async getOrderById(orderId, userId = null, vendorId = null, options = {}) {
         try {
@@ -529,6 +560,121 @@ class Order {
         }
     }
 
+    static async autoConfirmDeliveredFulfillments({ gracePeriodDays = 7, batchSize = 100 } = {}) {
+        return transaction(pool, async (client) => {
+            const { rows: fulfillments } = await client.query(
+                `SELECT vof.id, vof.order_id, vof.vendor_id, vof.net_amount,
+                        o.currency_id, delivery.delivered_at,
+                        COALESCE((
+                            SELECT SUM(r.vendor_reserve_amount)
+                            FROM returns r
+                            WHERE r.order_id = vof.order_id
+                              AND r.vendor_id = vof.vendor_id
+                              AND r.status NOT IN ('rejected', 'cancelled')
+                        ), 0)::numeric AS reserved_amount,
+                        COALESCE((
+                            SELECT SUM(p.amount) FROM vendor_payouts p
+                            WHERE p.fulfillment_id = vof.id
+                              AND p.status IN ('pending', 'processing', 'paid')
+                        ), 0)::numeric AS paid_or_due_amount,
+                        (SELECT COUNT(*)::int FROM vendor_payouts p
+                         WHERE p.fulfillment_id = vof.id) AS payout_count
+                 FROM vendor_order_fulfillments vof
+                 JOIN orders o ON o.id = vof.order_id
+                 JOIN LATERAL (
+                    SELECT MAX(COALESCE(s.actual_delivery, s.updated_at)) AS delivered_at
+                    FROM shipments s
+                    WHERE s.order_id = vof.order_id
+                      AND s.vendor_id = vof.vendor_id
+                      AND s.status = 'delivered'
+                 ) delivery ON delivery.delivered_at IS NOT NULL
+                 WHERE vof.payout_status IN ('held', 'disputed', 'eligible')
+                   AND vof.status = 'delivered'
+                   AND o.payment_status = 'paid'
+                   AND (
+                       vof.payout_status = 'eligible' OR
+                       delivery.delivered_at <= NOW() - ($1::int * INTERVAL '1 day')
+                   )
+                   AND vof.net_amount > COALESCE((
+                       SELECT SUM(r.vendor_reserve_amount)
+                       FROM returns r
+                       WHERE r.order_id = vof.order_id
+                         AND r.vendor_id = vof.vendor_id
+                         AND r.status NOT IN ('rejected', 'cancelled')
+                   ), 0)
+                 ORDER BY delivery.delivered_at, vof.id
+                 LIMIT $2
+                 FOR UPDATE OF vof SKIP LOCKED`,
+                [gracePeriodDays, batchSize]
+            );
+
+            for (const fulfillment of fulfillments) {
+                await client.query('SELECT id FROM vendors WHERE id = $1 FOR UPDATE', [fulfillment.vendor_id]);
+                const fulfillmentRemaining = Math.max(
+                    0,
+                    Math.round((Number(fulfillment.net_amount) - Number(fulfillment.reserved_amount) - Number(fulfillment.paid_or_due_amount)) * 100) / 100
+                );
+                const payableAmount = Math.min(
+                    fulfillmentRemaining,
+                    await availableVendorBalance(client, fulfillment.vendor_id, fulfillment.currency_id)
+                );
+                if (payableAmount <= 0) continue;
+                const { rows: updated } = await client.query(
+                    `UPDATE vendor_order_fulfillments
+                     SET payout_status = 'eligible', updated_at = NOW()
+                     WHERE id = $1 AND payout_status IN ('held', 'disputed')
+                     RETURNING id`,
+                    [fulfillment.id]
+                );
+                if (!updated.length) continue;
+
+                const baseReference = `payout:${fulfillment.order_id}:${fulfillment.vendor_id}:${fulfillment.id}`;
+                const reference = Number(fulfillment.payout_count) === 0
+                    ? baseReference
+                    : `${baseReference}:cycle:${Number(fulfillment.payout_count) + 1}`;
+                const metadata = {
+                    source: 'automatic_delivery_confirmation',
+                    delivered_at: fulfillment.delivered_at,
+                    grace_period_days: gracePeriodDays,
+                    reserved_amount: Number(fulfillment.reserved_amount),
+                };
+                await client.query(
+                    `INSERT INTO vendor_payouts
+                     (vendor_id, order_id, fulfillment_id, currency_id, amount, status, payout_method,
+                      reference, metadata)
+                     VALUES ($1, $2, $3, $4, $5, 'pending', 'bank_transfer', $6, $7)
+                     ON CONFLICT (reference) DO NOTHING`,
+                    [
+                        fulfillment.vendor_id,
+                        fulfillment.order_id,
+                        fulfillment.id,
+                        fulfillment.currency_id,
+                        payableAmount,
+                        reference,
+                        JSON.stringify(metadata),
+                    ]
+                );
+                await client.query(
+                    `INSERT INTO ledger_entries
+                     (vendor_id, order_id, fulfillment_id, entry_type, amount, currency_id,
+                      idempotency_key, metadata)
+                     VALUES ($1, $2, $3, 'payout_eligible', 0, $4, $5, $6)
+                     ON CONFLICT (idempotency_key) DO NOTHING`,
+                    [
+                        fulfillment.vendor_id,
+                        fulfillment.order_id,
+                        fulfillment.id,
+                        fulfillment.currency_id,
+                        `product:${fulfillment.order_id}:${fulfillment.vendor_id}:payout-eligible`,
+                        JSON.stringify(metadata),
+                    ]
+                );
+                await releasePayoutHold(client, fulfillment.id, { source: 'automatic_delivery_confirmation' });
+            }
+            return fulfillments.length;
+        });
+    }
+
     static async confirmVendorDelivery(orderId, userId, vendorId) {
         return transaction(pool, async (client) => {
             const order = (
@@ -569,27 +715,38 @@ class Order {
                     'Vendor shipment is not marked delivered',
                     409
                 );
-            const activeReturn = (
+            const reserve = (
                 await client.query(
-                    `SELECT 1 FROM returns r
-                     WHERE r.order_id = $1 AND r.vendor_id = $2
-                     AND r.status NOT IN ('rejected', 'cancelled', 'completed')
-                     LIMIT 1`,
+                    `SELECT COALESCE(SUM(vendor_reserve_amount), 0)::numeric AS amount
+                     FROM returns WHERE order_id = $1 AND vendor_id = $2
+                       AND status NOT IN ('rejected', 'cancelled')`,
                     [orderId, vendorId]
                 )
             ).rows[0];
-            if (activeReturn)
-                throw new CheckoutError(
-                    'Delivery cannot be confirmed while a return is in progress',
-                    409
-                );
-            await client.query(
-                `UPDATE vendor_order_fulfillments
-                 SET payout_status = 'eligible', updated_at = NOW()
-                 WHERE id = $1`,
+            await client.query('SELECT id FROM vendors WHERE id = $1 FOR UPDATE', [vendorId]);
+            const { rows: [existingPayouts] } = await client.query(
+                `SELECT COALESCE(SUM(amount) FILTER (
+                            WHERE status IN ('pending', 'processing', 'paid')
+                        ), 0)::numeric AS paid_or_due_amount,
+                        COUNT(*)::int AS payout_count
+                 FROM vendor_payouts WHERE fulfillment_id = $1`,
                 [fulfillment.id]
             );
+            const fulfillmentRemaining = Math.max(
+                0,
+                Math.round((Number(fulfillment.net_amount) - Number(reserve.amount) - Number(existingPayouts.paid_or_due_amount)) * 100) / 100
+            );
+            const payoutAmount = Math.min(
+                fulfillmentRemaining,
+                await availableVendorBalance(client, vendorId, order.currency_id)
+            );
             await client.query(
+                `UPDATE vendor_order_fulfillments
+                 SET payout_status = $2, updated_at = NOW()
+                 WHERE id = $1`,
+                [fulfillment.id, payoutAmount > 0 ? 'eligible' : 'held']
+            );
+            if (payoutAmount > 0) await client.query(
                 `INSERT INTO vendor_payouts
                  (vendor_id, order_id, fulfillment_id, currency_id, amount, status, payout_method,
                   reference, metadata)
@@ -600,9 +757,15 @@ class Order {
                     orderId,
                     fulfillment.id,
                     order.currency_id,
-                    fulfillment.net_amount,
-                    `payout:${orderId}:${vendorId}:${fulfillment.id}`,
-                    JSON.stringify({ confirmed_by: userId, source: 'delivery_confirmation' }),
+                    payoutAmount,
+                    Number(existingPayouts.payout_count) === 0
+                        ? `payout:${orderId}:${vendorId}:${fulfillment.id}`
+                        : `payout:${orderId}:${vendorId}:${fulfillment.id}:cycle:${Number(existingPayouts.payout_count) + 1}`,
+                    JSON.stringify({
+                        confirmed_by: userId,
+                        source: 'delivery_confirmation',
+                        reserved_amount: Number(reserve.amount),
+                    }),
                 ]
             );
             await client.query(
@@ -620,10 +783,13 @@ class Order {
                     JSON.stringify({ confirmed_by: userId }),
                 ]
             );
+            if (payoutAmount > 0) await releasePayoutHold(client, fulfillment.id, { source: 'delivery_confirmation', confirmed_by: userId });
             return {
                 order_id: orderId,
                 vendor_id: vendorId,
-                payout_status: 'eligible',
+                payout_status: payoutAmount > 0 ? 'eligible' : 'held',
+                payout_amount: payoutAmount,
+                reserved_amount: Number(reserve.amount),
             };
         });
     }

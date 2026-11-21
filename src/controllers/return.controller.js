@@ -1,5 +1,6 @@
 import Return from "#models/return.model.js";
 import { createReturnRequestSchema, updateReturnStatusSchema, adminUpdateReturnSchema } from "#schemas/order.schema.js";
+import { normalizeReturnRequest } from "#utils/return-policy.js";
 import ERROR_CODES from "#utils/error.codes.js";
 import { respondWithError, respondWithSuccess } from "#utils/response.js";
 
@@ -14,7 +15,10 @@ export const createReturnRequest = async (req, res) => {
 
         const { orderId } = params;
 
-        const { error, value } = createReturnRequestSchema.validate(body ?? {}, { abortEarly: false, stripUnknown: true });
+        const { error, value } = createReturnRequestSchema.validate(
+            normalizeReturnRequest(body),
+            { abortEarly: false, stripUnknown: true }
+        );
         if (error) {
             return respondWithError(res, 400, error.details.map((detail) => detail.message).join(', '), ERROR_CODES.VALIDATION_ERROR);
         }
@@ -24,7 +28,7 @@ export const createReturnRequest = async (req, res) => {
             return respondWithError(res, result.code, result.error, ERROR_CODES.VALIDATION_ERROR);
         }
 
-        return respondWithSuccess(res, 201, 'Return request created successfully', result);
+        return respondWithSuccess(res, 201, 'Return request initiated successfully', result);
     } catch (error) {
         console.error("Error creating return request:", error);
         return respondWithError(res, 500, 'Internal Server Error', ERROR_CODES.INTERNAL_SERVER_ERROR);

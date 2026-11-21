@@ -92,21 +92,16 @@ export class Payment {
                     payment_reference: payment.gateway_ref,
                 },
             };
-            const response =
-                gateway === 'paystack'
-                    ? await Payment.gatewayApi.initializePaystack(args)
-                    : await Payment.gatewayApi.initializeStripe(args);
+            const response = await Payment.gatewayApi.initializePaystack(args);
             const result = {
                 gateway,
                 reference: payment.gateway_ref,
-                ...(gateway === 'paystack'
-                    ? { authorization_url: response.authorization_url }
-                    : { client_secret: response.client_secret }),
+                authorization_url: response.authorization_url,
             };
             await pool.query(
                 `UPDATE payments SET provider_ref = $1, checkout_data = $2, initializing_until = NULL, updated_at = NOW() WHERE id = $3`,
                 [
-                    gateway === 'paystack' ? payment.gateway_ref : response.id,
+                    payment.gateway_ref,
                     JSON.stringify(result),
                     payment.id,
                 ]
@@ -140,7 +135,7 @@ export class Payment {
     }
 
     static async verifyPayment(gateway, reference, userId) {
-        if (!['paystack', 'stripe'].includes(gateway) || !reference || !userId)
+        if (gateway !== 'paystack' || !reference || !userId)
             throw new CheckoutError(
                 'Invalid payment verification request',
                 400
@@ -151,22 +146,17 @@ export class Payment {
         );
         const payment = rows[0];
         if (!payment) throw new CheckoutError('Payment not found', 404);
-        const providerRef =
-            payment.provider_ref || (gateway === 'paystack' ? reference : null);
+        const providerRef = payment.provider_ref || reference;
         if (!providerRef)
             throw new CheckoutError('Payment is still initializing', 409);
-        const data =
-            gateway === 'paystack'
-                ? await Payment.gatewayApi.verifyPaystack(providerRef)
-                : await Payment.gatewayApi.verifyStripe(providerRef);
+        const data = await Payment.gatewayApi.verifyPaystack(providerRef);
         return Payment.settle(gateway, data);
     }
 
     static async settle(gateway, data, eventId = null) {
-        const reference =
-            gateway === 'paystack'
-                ? data.reference
-                : data.metadata?.payment_reference;
+        if (gateway !== 'paystack')
+            throw new CheckoutError('Unsupported payment gateway', 422);
+        const reference = data.reference;
         if (!reference)
             throw new CheckoutError('Missing payment reference', 400);
         if (typeof reference === 'string' && reference.startsWith('booking-'))
@@ -192,29 +182,16 @@ export class Payment {
                     [gateway, reference]
                 )
             ).rows[0];
-            if (
-                gateway === 'stripe' &&
-                ((payment.provider_ref && payment.provider_ref !== data.id) ||
-                    String(data.metadata?.order_id) !== String(order.id))
-            )
-                throw new CheckoutError('Payment identity mismatch', 409);
-            const success =
-                gateway === 'paystack'
-                    ? data.status === 'success'
-                    : data.status === 'succeeded';
+            const success = data.status === 'success';
             const amount =
-                gateway === 'stripe' && success
-                    ? data.amount_received
-                    : gateway === 'paystack' &&
-                        success &&
-                        data.requested_amount !== undefined &&
-                        data.requested_amount !== null
-                      ? data.requested_amount
-                      : data.amount;
+                success &&
+                data.requested_amount !== undefined &&
+                data.requested_amount !== null
+                    ? data.requested_amount
+                    : data.amount;
             const receivedAmount = Number(data.amount);
             const expectedAmount = Number(amount);
             const amountIsInsufficient =
-                gateway === 'paystack' &&
                 success &&
                 (!Number.isSafeInteger(receivedAmount) ||
                     receivedAmount < expectedAmount);
@@ -258,7 +235,7 @@ export class Payment {
             }
             await client.query(
                 `UPDATE payments SET status = 'success', provider_ref = $1, paid_at = NOW(), initializing_until = NULL, updated_at = NOW() WHERE id = $2`,
-                [gateway === 'stripe' ? data.id : reference, payment.id]
+                [reference, payment.id]
             );
             // A cancelled reservation must never be resurrected into fulfillment.
             const status =
@@ -394,15 +371,6 @@ export class Payment {
                     if (!existing) throw error;
                     providerData = existing;
                 }
-            } else if (refund.gateway === 'stripe') {
-                providerData = refund.status === 'queued' && refund.provider_ref
-                    ? await Payment.gatewayApi.stripeClient().refunds.retrieve(refund.provider_ref)
-                    : await Payment.gatewayApi.refundStripe({
-                        paymentIntentId: refund.transaction_reference,
-                        amount: refund.amount,
-                        refundReference: refund.refund_reference,
-                        reason: 'requested_by_customer',
-                    });
             } else {
                 throw new CheckoutError('Unsupported payment gateway for refunds', 422);
             }

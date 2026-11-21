@@ -188,6 +188,15 @@ model vendors {
   service_bookings service_bookings[]
   promotions       promotions[]
   payouts          vendor_payouts[]
+  payout_ledger_entries vendor_ledger_entries[]
+  payout_batches payout_batches[]
+  automated_payouts payouts[]
+  paystack_recipient_code String? @unique
+  payout_mode String @default("manual")
+  payout_cadence String @default("weekly")
+  next_payout_at DateTime? @db.Timestamptz(6)
+  minimum_payout_minor BigInt @default(0)
+  tax_rate_bps Int @default(0)
   vendorSettings   vendor_settings?
 }
 
@@ -214,8 +223,8 @@ model admins {
   created_by        users?              @relation("AdminCreatedBy", fields: [created_by_user_id], references: [id], onDelete: SetNull)
   permissions       admin_permissions[]
   audit_logs        admin_audit_logs[]
-  vendorSettings    vendor_settings?    @relation(fields: [vendor_settingsId], references: [id])
-  vendor_settingsId Int?
+  vendorSettings    vendor_settings?    @relation(fields: [vendor_settings_id], references: [id])
+  vendor_settings_id Int? @map("vendor_settingsId")
 
   @@index([scope, status])
   @@index([vendor_id, status])
@@ -275,8 +284,8 @@ model admin_audit_logs {
   actor             users            @relation("AdminAuditActor", fields: [actor_user_id], references: [id], onDelete: Restrict)
   target_admin      admins?          @relation(fields: [target_admin_id], references: [id], onDelete: SetNull)
   vendor            vendors?         @relation(fields: [vendor_id], references: [id], onDelete: SetNull)
-  vendorSettings    vendor_settings? @relation(fields: [vendor_settingsId], references: [id])
-  vendor_settingsId Int?
+  vendorSettings    vendor_settings? @relation(fields: [vendor_settings_id], references: [id])
+  vendor_settings_id Int? @map("vendor_settingsId")
 
   @@index([actor_user_id, created_at])
   @@index([target_admin_id, created_at])
@@ -393,8 +402,8 @@ model products {
   reviews           reviews[]
   wishlist_items    wishlist_items[]
   coupons           coupons[]
-  vendorSettings    vendor_settings?     @relation(fields: [vendor_settingsId], references: [id])
-  vendor_settingsId Int?
+  vendorSettings    vendor_settings?     @relation(fields: [vendor_settings_id], references: [id])
+  vendor_settings_id Int? @map("vendor_settingsId")
 
   @@index([currency_id])
 }
@@ -413,8 +422,8 @@ model product_images {
   // Relations
   product           products         @relation(fields: [product_id], references: [id], onDelete: Cascade)
   vendor            vendors          @relation(fields: [vendor_id], references: [id], onDelete: Cascade)
-  vendorSettings    vendor_settings? @relation(fields: [vendor_settingsId], references: [id])
-  vendor_settingsId Int?
+  vendorSettings    vendor_settings? @relation(fields: [vendor_settings_id], references: [id])
+  vendor_settings_id Int? @map("vendor_settingsId")
 }
 
 model product_variants {
@@ -445,8 +454,8 @@ model product_variants {
   cart_items        cart_items[]
   order_items       order_items[]
   option_values     variant_option_values[]
-  vendorSettings    vendor_settings?        @relation(fields: [vendor_settingsId], references: [id])
-  vendor_settingsId Int?
+  vendorSettings    vendor_settings?        @relation(fields: [vendor_settings_id], references: [id])
+  vendor_settings_id Int? @map("vendor_settingsId")
 }
 
 model product_attributes {
@@ -593,6 +602,8 @@ model orders {
   vendor_fulfillments   vendor_order_fulfillments[]
   ledger_entries        ledger_entries[]
   payouts               vendor_payouts[]
+  payout_ledger_entries vendor_ledger_entries[]
+  automated_payouts payouts[]
   payments              payments[]
   shipments             shipments[]
   returns               returns[]
@@ -627,6 +638,8 @@ model vendor_order_fulfillments {
   history        vendor_order_fulfillment_history[]
   ledger_entries ledger_entries[]
   payouts        vendor_payouts[]
+  payout_ledger_entries vendor_ledger_entries[]
+  automated_payouts payouts[]
 
   @@unique([order_id, vendor_id])
   @@index([vendor_id, status])
@@ -655,6 +668,84 @@ model vendor_payouts {
   @@index([vendor_id, status, created_at])
   @@index([status, created_at])
   @@map("vendor_payouts")
+}
+
+model vendor_ledger_entries {
+  id BigInt @id @default(autoincrement())
+  vendor_id Int
+  order_id Int?
+  fulfillment_id Int?
+  payout_batch_id BigInt?
+  payout_id BigInt?
+  currency_id Int
+  entry_type String
+  amount_minor BigInt
+  idempotency_key String @unique
+  metadata Json?
+  created_at DateTime @default(now())
+  vendor vendors @relation(fields: [vendor_id], references: [id], onDelete: Restrict)
+  order orders? @relation(fields: [order_id], references: [id], onDelete: Restrict)
+  fulfillment vendor_order_fulfillments? @relation(fields: [fulfillment_id], references: [id], onDelete: Restrict)
+  batch payout_batches? @relation(fields: [payout_batch_id], references: [id], onDelete: Restrict)
+  payout payouts? @relation(fields: [payout_id], references: [id], onDelete: Restrict)
+  currency currencies @relation(fields: [currency_id], references: [id], onDelete: Restrict)
+  @@index([vendor_id, currency_id, created_at, id])
+  @@index([order_id])
+}
+
+model payout_batches {
+  id BigInt @id @default(autoincrement())
+  vendor_id Int
+  currency_id Int
+  reference String @unique
+  cadence String
+  status String @default(pending)
+  gross_amount_minor BigInt
+  transfer_fee_minor BigInt @default(0)
+  tax_amount_minor BigInt @default(0)
+  payout_amount_minor BigInt
+  created_at DateTime @default(now())
+  processed_at DateTime?
+  completed_at DateTime?
+  vendor vendors @relation(fields: [vendor_id], references: [id], onDelete: Restrict)
+  currency currencies @relation(fields: [currency_id], references: [id], onDelete: Restrict)
+  payouts payouts[]
+  ledger_entries vendor_ledger_entries[]
+  @@index([vendor_id, status, created_at])
+  @@index([status, created_at])
+}
+
+model payouts {
+  id BigInt @id @default(autoincrement())
+  vendor_id Int
+  batch_id BigInt?
+  order_id Int?
+  fulfillment_id Int?
+  currency_id Int
+  reference String @unique
+  provider_reference String? @unique
+  transfer_code String?
+  amount_minor BigInt
+  transfer_fee_minor BigInt @default(0)
+  tax_amount_minor BigInt @default(0)
+  status String @default(pending)
+  failure_code String?
+  failure_message String?
+  attempts Int @default(0)
+  created_at DateTime @default(now())
+  processed_at DateTime?
+  paid_at DateTime?
+  reversed_at DateTime?
+  updated_at DateTime @updatedAt
+  vendor vendors @relation(fields: [vendor_id], references: [id], onDelete: Restrict)
+  batch payout_batches? @relation(fields: [batch_id], references: [id], onDelete: Restrict)
+  order orders? @relation(fields: [order_id], references: [id], onDelete: Restrict)
+  fulfillment vendor_order_fulfillments? @relation(fields: [fulfillment_id], references: [id], onDelete: Restrict)
+  currency currencies @relation(fields: [currency_id], references: [id], onDelete: Restrict)
+  ledger_entries vendor_ledger_entries[]
+  @@index([vendor_id, status, created_at])
+  @@index([status, created_at])
+  @@index([batch_id])
 }
 
 model vendor_order_fulfillment_history {
@@ -736,8 +827,8 @@ model order_items {
   variant           product_variants? @relation(fields: [variant_id], references: [id])
   vendor            vendors           @relation(fields: [vendor_id], references: [id])
   return_items      return_items[]
-  vendorSettings    vendor_settings?  @relation(fields: [vendor_settingsId], references: [id])
-  vendor_settingsId Int?
+  vendorSettings    vendor_settings?  @relation(fields: [vendor_settings_id], references: [id])
+  vendor_settings_id Int? @map("vendor_settingsId")
 
   // Performance Compound Indexes
   @@index([order_id])
@@ -785,7 +876,7 @@ model payments {
   order_id           Int?
   user_id            Int
   vendor_id          Int?
-  gateway            String // paystack, stripe, etc
+  gateway            String // payment provider identifier
   gateway_ref        String            @unique
   amount             Decimal           @db.Decimal(10, 2)
   currency_id        Int
@@ -798,8 +889,8 @@ model payments {
   order             orders?          @relation(fields: [order_id], references: [id])
   user              users            @relation(fields: [user_id], references: [id])
   vendor            vendors?         @relation(fields: [vendor_id], references: [id])
-  vendorSettings    vendor_settings? @relation(fields: [vendor_settingsId], references: [id])
-  vendor_settingsId Int?
+  vendorSettings    vendor_settings? @relation(fields: [vendor_settings_id], references: [id])
+  vendor_settings_id Int? @map("vendor_settingsId")
 }
 
 model coupons {
@@ -826,8 +917,8 @@ model coupons {
   product           products?        @relation(fields: [product_id], references: [id])
   service           services?        @relation(fields: [service_id], references: [id])
   orders            orders[]
-  vendorSettings    vendor_settings? @relation(fields: [vendor_settingsId], references: [id])
-  vendor_settingsId Int?
+  vendorSettings    vendor_settings? @relation(fields: [vendor_settings_id], references: [id])
+  vendor_settings_id Int? @map("vendor_settingsId")
 
   @@unique([vendor_id, code])
   @@index([status, expires_at])
@@ -928,9 +1019,17 @@ model returns {
   user_id       Int
   vendor_id     Int?
   reason        String
+  reason_type   String    @default("change_of_mind")
   description   String?
   return_type   String // full, partial, exchange
   refund_amount Decimal   @default(0) @db.Decimal(10, 2)
+  vendor_reserve_amount Decimal   @default(0) @db.Decimal(10, 2)
+  refund_status String    @default("not_requested")
+  refund_reference String?
+  refund_processed_at DateTime?
+  delivered_at DateTime?
+  return_window_expires_at DateTime?
+  policy_version String   @default("2026-11-12")
   status        String    @default("pending") // pending, approved, rejected, shipped, received, completed
   created_at    DateTime  @default(now())
   updated_at    DateTime? @updatedAt
@@ -946,8 +1045,8 @@ model returns {
   user              users            @relation(fields: [user_id], references: [id])
   vendor            vendors?         @relation(fields: [vendor_id], references: [id])
   items             return_items[]
-  vendorSettings    vendor_settings? @relation(fields: [vendor_settingsId], references: [id])
-  vendor_settingsId Int?
+  vendorSettings    vendor_settings? @relation(fields: [vendor_settings_id], references: [id])
+  vendor_settings_id Int? @map("vendor_settingsId")
 }
 
 model return_items {
@@ -1029,8 +1128,8 @@ model support_tickets {
   user              users?                   @relation(fields: [user_id], references: [id])
   vendor            vendors?                 @relation(fields: [vendor_id], references: [id])
   replies           support_ticket_replies[]
-  vendorSettings    vendor_settings?         @relation(fields: [vendor_settingsId], references: [id])
-  vendor_settingsId Int?
+  vendorSettings    vendor_settings?         @relation(fields: [vendor_settings_id], references: [id])
+  vendor_settings_id Int? @map("vendor_settingsId")
 
   @@index([user_id, created_at])
   @@index([assigned_to, status])
@@ -1177,6 +1276,8 @@ model currencies {
   orders         orders[]
   ledger_entries ledger_entries[]
   payouts        vendor_payouts[]
+  payout_ledger_entries vendor_ledger_entries[]
+  automated_payouts payouts[]
   id             Int              @id @default(autoincrement())
   code           String           @unique
   name           String
@@ -1277,6 +1378,9 @@ model PaystackWebhookEvent {
   subscriptionCode String?   @map("subscription_code")
   customerCode     String?   @map("customer_code")
   eventStatus      String?   @map("event_status")
+  resourceId       String?   @map("resource_id")
+  amountMinor      BigInt?   @map("amount_minor")
+  resolution       String?
   status           String    @default("pending")
   attempts         Int       @default(0)
   availableAt      DateTime  @default(now()) @map("available_at")
@@ -1465,8 +1569,8 @@ model service_bookings {
   service           services         @relation(fields: [service_id], references: [id]) // Linked safely here
   user              users            @relation(fields: [user_id], references: [id])
   vendors           vendors          @relation(fields: [vendor_id], references: [id])
-  vendorSettings    vendor_settings? @relation(fields: [vendor_settingsId], references: [id])
-  vendor_settingsId Int?
+  vendorSettings    vendor_settings? @relation(fields: [vendor_settings_id], references: [id])
+  vendor_settings_id Int? @map("vendor_settingsId")
 
   @@index([service_id, booking_status])
   @@map("service_bookings")

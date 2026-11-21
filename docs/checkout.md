@@ -10,7 +10,7 @@ No migration is applied automatically by the application.
 1. GET `/v1/api/cart/preview-checkout?country=Nigeria&coupon_code=...`.
    Omit coupon_code when unused. Monetary values are decimal strings; currency is explicit.
 2. POST `/v1/api/cart/checkout` with the existing flat contact/address fields plus:
-    - `gateway`: `paystack` or `stripe`.
+    - `gateway`: `paystack`.
     - `expected_currency`: the currency from the preview.
     - `expected_total`: the preview total as a JSON number.
     - `idempotency_key`: a new UUID v4 per checkout, or pass it in `Idempotency-Key`.
@@ -60,7 +60,7 @@ payments can be represented as escrowed or released.
 Checkout creation is limited to 10 requests/minute per authenticated user per server instance; payment endpoints allow 30. Use an edge/distributed limiter when scaling horizontally.
 
 Prices are read afresh at checkout. A changed total returns 409 before creating an order.
-Mixed-currency carts are rejected. Launch support is NGN via Paystack and USD/EUR/GBP via Stripe;
+Mixed-currency carts are rejected. Launch support is NGN via Paystack;
 no implicit exchange or zero-decimal currency conversion is performed.
 
 ## Configuration
@@ -72,9 +72,8 @@ Example shape only (replace with approved business rates):
 An empty configuration rejects paid-shipping destinations. Free-shipping products remain free.
 This does not calculate taxes, carrier quotes, or duties; those require the business's destination rules.
 
-Configure payment-provider credentials, `STRIPE_WEBHOOK_SECRET`, and SMTP settings.
-Register Paystack `/v1/api/webhook/paystack` and Stripe `/v1/api/webhook/stripe`
-(`payment_intent.succeeded`). These routes consume raw JSON bytes before session/JSON middleware.
+Configure Paystack credentials and SMTP settings.
+Register Paystack `/v1/api/webhook/paystack`. This route consumes raw JSON bytes before session/JSON middleware.
 Signature verification and amount/currency checks are mandatory. Repeated events are acknowledged;
 event insertion and order/payment updates commit together.
 
@@ -107,6 +106,5 @@ at a disposable PostgreSQL database and run `node --test test/checkout-database.
 This test creates a uniquely named schema, applies the checkout migration against fixtures,
 and removes that schema after testing. It never falls back to the application database URL.
 
-Provider behavior references: [Paystack verification](https://paystack.com/docs/payments/verify-payments/),
-[Paystack webhooks](https://paystack.com/docs/payments/webhooks/), and
-[Stripe idempotency](https://docs.stripe.com/api/idempotent_requests).
+Provider behavior references: [Paystack verification](https://paystack.com/docs/payments/verify-payments/)
+and [Paystack webhooks](https://paystack.com/docs/payments/webhooks/).

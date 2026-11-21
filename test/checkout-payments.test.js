@@ -3,7 +3,7 @@ import test from 'node:test';
 import crypto from 'node:crypto';
 import pool from '../src/services/pg_pool.js';
 import Payment from '../src/models/payment.model.js';
-import { paystackWebhook, stripeWebhook } from '../src/services/webhook.js';
+import { paystackWebhook } from '../src/services/webhook.js';
 
 const order = {
     id: 5,
@@ -263,50 +263,5 @@ test('paystack signature is checked on raw bytes and duplicate delivery is queue
             call.sql.startsWith('INSERT INTO paystack_webhook_events')
         ).length,
         2
-    );
-});
-test('stripe webhook rejects unsigned requests', async () => {
-    const res = response();
-    await stripeWebhook({ body: Buffer.from('{}'), headers: {} }, res);
-    assert.equal(res.code, 400);
-});
-
-test('stripe confirmation verifies intent identity and received amount', async (t) => {
-    const calls = db(t, (sql) =>
-        sql.startsWith('SELECT p.*')
-            ? {
-                  rows: [
-                      {
-                          ...payment,
-                          gateway: 'stripe',
-                          currency: 'USD',
-                          provider_ref: 'pi_test',
-                      },
-                  ],
-              }
-            : undefined
-    );
-    const data = {
-        id: 'pi_test',
-        status: 'succeeded',
-        currency: 'usd',
-        amount_received: 2050,
-        metadata: { payment_reference: 'checkout-test', order_id: '5' },
-    };
-    assert.equal(
-        (await Payment.settle('stripe', data, 'evt_success')).status,
-        'processing'
-    );
-    await assert.rejects(
-        Payment.settle('stripe', { ...data, id: 'pi_other' }, 'evt_other'),
-        /identity mismatch/
-    );
-    await assert.rejects(
-        Payment.settle(
-            'stripe',
-            { ...data, amount_received: 1000 },
-            'evt_short'
-        ),
-        /amount or currency mismatch/
     );
 });

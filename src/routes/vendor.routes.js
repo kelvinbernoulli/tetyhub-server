@@ -118,8 +118,9 @@ router.get('/transactions', canRead('transactions'), pagination, TransactionHist
 router.get('/payouts/summary', canRead('transactions'), PayoutController.getSummary);
 router.get('/payouts', canRead('transactions'), pagination, PayoutController.listPayouts);
 router.get('/payouts/:payoutId', canRead('transactions'), PayoutController.getPayoutById);
-router.patch('/payouts/:payoutId/process', canUpdate('transactions'), PayoutController.processPayout);
-router.patch('/payouts/:payoutId/settle', canUpdate('transactions'), PayoutController.settlePayout);
+router.post('/payouts/recipient', PayoutController.createRecipient);
+router.post('/payouts/request', PayoutController.requestPayout);
+router.patch('/payouts/preferences', PayoutController.updatePreferences);
 
 //dashboard
 router.get("/dashboard/overview", canRead('dashboard'), VendorController.getDashboard);

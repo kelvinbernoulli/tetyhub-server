@@ -7,6 +7,7 @@ import * as AdminTypesController from "#controllers/admin.type.controller.js";
 import * as AdminsController from "#controllers/admin.controller.js";
 import * as PermissionsController from "#controllers/permission.controller.js";
 import * as TransactionHistoryController from "#controllers/transaction.history.controller.js";
+import * as PayoutController from '#controllers/payout.controller.js';
 import * as CommissionController from "#controllers/commission.controller.js";
 import * as SubscriptionPlansController from "#controllers/subscription-plans.controller.js";
 import * as KYCController from '#controllers/kyc.controller.js';
@@ -107,6 +108,10 @@ router.get("/permissions/:adminId", canRead('admins'), PermissionsController.fet
 
 //transactions
 router.get("/transactions", canRead('transactions'), pagination, TransactionHistoryController.getAllTransactions);
+router.get('/payouts', canRead('transactions'), pagination, PayoutController.listAdminPayouts);
+router.post('/payouts/:payoutId/retry', canUpdate('transactions'), requireRecentAuthentication(), PayoutController.retryPayout);
+router.post('/payouts/:payoutId/finalize', canUpdate('transactions'), requireRecentAuthentication(), PayoutController.finalizePayout);
+router.patch('/vendors/:vendorId/payout-tax-rate', canUpdate('transactions'), requireRecentAuthentication(), PayoutController.updateVendorTaxRate);
 
 // ShipBubble label booking failures on paid orders
 router.get(

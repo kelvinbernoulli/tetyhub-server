@@ -1,4 +1,5 @@
 import pool from '#services/pg_pool.js';
+import { transaction } from '#utils/checkout.js';
 
 class PayoutModel {
     static async listForVendor(vendorId, { status, limit = 20, offset = 0 } = {}) {
@@ -64,41 +65,65 @@ class PayoutModel {
             error.status = 409;
             throw error;
         }
-
-        const { rows } = await pool.query(
-            `UPDATE vendor_payouts
-             SET status = 'processing', processed_at = NOW()
-             WHERE id = $1 AND vendor_id = $2
-             RETURNING *`,
-            [Number(payoutId), Number(vendorId)]
-        );
-
-        return rows[0];
-    }
-
-    static async settlePaid(vendorId, payoutId) {
-        const existing = await this.findForVendor(vendorId, payoutId);
-        if (!existing) {
-            const error = new Error('Payout not found.');
-            error.status = 404;
-            throw error;
-        }
-
-        if (existing.status !== 'processing') {
-            const error = new Error('Only processing payouts can be settled as paid.');
+        if (Number(existing.amount) <= 0) {
+            const error = new Error('A payout must have a positive amount.');
             error.status = 409;
             throw error;
         }
 
         const { rows } = await pool.query(
             `UPDATE vendor_payouts
-             SET status = 'paid', paid_at = NOW(), processed_at = COALESCE(processed_at, NOW())
-             WHERE id = $1 AND vendor_id = $2
+             SET status = 'processing', processed_at = NOW()
+             WHERE id = $1 AND vendor_id = $2 AND status = 'pending' AND amount > 0
              RETURNING *`,
             [Number(payoutId), Number(vendorId)]
         );
-
+        if (!rows[0]) {
+            const error = new Error('Payout is no longer pending or has no payable balance.');
+            error.status = 409;
+            throw error;
+        }
         return rows[0];
+    }
+
+    static async settlePaid(vendorId, payoutId) {
+        return transaction(pool, async (client) => {
+            const { rows: [existing] } = await client.query(
+                'SELECT * FROM vendor_payouts WHERE id = $1 AND vendor_id = $2 FOR UPDATE',
+                [Number(payoutId), Number(vendorId)]
+            );
+            if (!existing) {
+                const error = new Error('Payout not found.');
+                error.status = 404;
+                throw error;
+            }
+            if (existing.status !== 'processing') {
+                const error = new Error('Only processing payouts can be settled as paid.');
+                error.status = 409;
+                throw error;
+            }
+
+            const { rows: [paid] } = await client.query(
+                `UPDATE vendor_payouts
+                 SET status = 'paid', paid_at = NOW(), processed_at = COALESCE(processed_at, NOW())
+                 WHERE id = $1 AND vendor_id = $2
+                 RETURNING *`,
+                [Number(payoutId), Number(vendorId)]
+            );
+            if (paid.fulfillment_id) {
+                await client.query(
+                    `INSERT INTO ledger_entries
+                     (vendor_id, order_id, fulfillment_id, currency_id, entry_type, amount,
+                      idempotency_key, metadata)
+                     VALUES ($1, $2, $3, $4, 'vendor_payout_debit', -$5, $6,
+                             jsonb_build_object('payout_id', $7))
+                     ON CONFLICT (idempotency_key) DO NOTHING`,
+                    [paid.vendor_id, paid.order_id, paid.fulfillment_id, paid.currency_id,
+                        paid.amount, `payout:${paid.id}:vendor-debit`, paid.id]
+                );
+            }
+            return paid;
+        });
     }
 
     static async summaryForVendor(vendorId) {

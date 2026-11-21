@@ -2,9 +2,9 @@
 
 Existing customer, vendor, and platform-admin transaction routes are unchanged. Vendor owners and staff require the transactions read permission and use the vendor resolved by authentication. Customers can list and retrieve only their own payments. Platform-admin lists retain the existing platform-role and permission middleware.
 
-All lists support `status`, `payment_status`, `type=order|booking`, `offset`, and `limit` (1–100). Platform admins may also filter by `vendor_id`. Malformed IDs and unsupported filters return 400. Customer detail returns 404 for both missing and other customers' payments.
+All lists support `status`, `payment_status`, `type=order|booking`, `offset`, and `limit` (1â€“100). Platform admins may also filter by `vendor_id`. Malformed IDs and unsupported filters return 400. Customer detail returns 404 for both missing and other customers' payments.
 
-Each result includes public payment fields, currency code, a transaction `type`, and the applicable order or booking context. `status` describes the payment record; `payment_status` describes the associated order or booking. Internal gateway initialization data, Stripe client secrets, provider metadata, and initialization leases are excluded.
+Each result includes public payment fields, currency code, a transaction `type`, and the applicable order or booking context. `status` describes the payment record; `payment_status` describes the associated order or booking. Internal gateway initialization data, provider metadata, and initialization leases are excluded.
 
 Order ownership comes from `order_items`; booking ownership comes from `service_bookings`. A multi-vendor payment appears once per list, without duplicate rows for multiple items. The `vendors` array includes store names from `vendor_settings.store_name`; vendor views restrict this array to the authenticated vendor.
 

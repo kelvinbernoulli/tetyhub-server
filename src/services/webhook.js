@@ -4,8 +4,8 @@ import Shipment from '#models/shipment.model.js';
 import SubscriptionService from '#services/subscription.service.js';
 import pool from '#services/pg_pool.js';
 import { transaction } from '#utils/checkout.js';
-import { stripeClient } from '#utils/payment.js';
 import { notifyReturn } from '#services/notifications.js';
+import { processChargebackEvent, reconcileTransferEvent } from '#services/vendor-payout.service.js';
 
 const PAYSTACK_EVENTS = new Set([
     'charge.success',
@@ -20,6 +20,12 @@ const PAYSTACK_EVENTS = new Set([
     'refund.needs-attention',
     'refund.failed',
     'refund.processed',
+  'transfer.success',
+  'transfer.failed',
+  'transfer.reversed',
+  'charge.dispute.create',
+  'charge.dispute.remind',
+  'charge.dispute.resolve',
 ]);
 
 export async function paystackWebhook(req, res) {
@@ -48,8 +54,11 @@ export async function paystackWebhook(req, res) {
             eventType === 'charge.success' && data.id !== undefined
                 ? String(data.id)
                 : null;
+        const resourceId = data.id !== undefined ? String(data.id) : null;
+        const amountMinor = Number.isSafeInteger(Number(data.amount)) ? Number(data.amount) : null;
+        const resolution = typeof data.resolution === 'string' ? data.resolution : null;
         const reference =
-            typeof data.reference === 'string' ? data.reference : null;
+            typeof data.reference === 'string' ? data.reference : (data.transaction?.reference ?? data.transaction_reference ?? null);
         const refundReference =
             typeof data.refund_reference === 'string' ? data.refund_reference : null;
         const subscriptionCode =
@@ -69,18 +78,14 @@ export async function paystackWebhook(req, res) {
         await pool.query(
             `INSERT INTO paystack_webhook_events
                 (event_key, event_type, reference, refund_reference, transaction_id,
-                 subscription_code, customer_code, event_status)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                 subscription_code, customer_code, event_status, resource_id, amount_minor, resolution)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
              ON CONFLICT (event_key) DO NOTHING`,
             [
-                `${eventType}:${identifier}`,
-                eventType,
-                reference,
-                refundReference,
-                transactionId,
-                subscriptionCode,
-                customerCode,
+                `${eventType}:${identifier}`, eventType, reference, refundReference,
+                transactionId, subscriptionCode, customerCode,
                 typeof data.status === 'string' ? data.status : null,
+                resourceId, amountMinor, resolution,
             ]
         );
         return res.sendStatus(200);
@@ -91,6 +96,14 @@ export async function paystackWebhook(req, res) {
 }
 
 export async function processPaystackEvent(event) {
+    if (event.event_type.startsWith('charge.dispute.')) {
+        await processChargebackEvent({ ...event, event_id: event.resource_id ?? event.event_key.split(':').slice(1).join(':'), amount_minor: event.amount_minor, resolution: event.resolution });
+        return;
+    }
+    if (event.event_type.startsWith('transfer.')) {
+        await reconcileTransferEvent(event);
+        return;
+    }
     if (event.event_type.startsWith('refund.')) {
         if (!event.refund_reference) {
             console.warn('Paystack refund event did not include a refund reference:', event.event_key);
@@ -120,6 +133,26 @@ export async function processPaystackEvent(event) {
                 [rows[0].return_id, refundStatus]
             );
             if (changed.rows[0]) await notifyReturn(client, changed.rows[0], changed.rows[0].status);
+            if (refundStatus === 'processed' && changed.rows[0]?.vendor_id && Number(changed.rows[0].vendor_reserve_amount) > 0) {
+                await client.query(
+                    `INSERT INTO vendor_ledger_entries
+                     (vendor_id, order_id, fulfillment_id, currency_id, entry_type, amount_minor, idempotency_key, metadata)
+                     SELECT $1, $2, vof.id, o.currency_id, entries.entry_type,
+                            entries.amount_minor, entries.idempotency_key, $5::jsonb
+                     FROM vendor_order_fulfillments vof JOIN orders o ON o.id = vof.order_id
+                     CROSS JOIN (VALUES
+                        ('vendor_return_reserve_release', ROUND($3::numeric * 100)::bigint, $4),
+                        ('vendor_refund_debit', -ROUND($3::numeric * 100)::bigint, $6)
+                     ) AS entries(entry_type, amount_minor, idempotency_key)
+                     WHERE vof.order_id = $2 AND vof.vendor_id = $1
+                     ON CONFLICT (idempotency_key) DO NOTHING`,
+                    [changed.rows[0].vendor_id, changed.rows[0].order_id,
+                        changed.rows[0].vendor_reserve_amount,
+                        'return:' + changed.rows[0].id + ':minor-reserve-clear',
+                        JSON.stringify({ return_id: changed.rows[0].id, refund_reference: event.refund_reference }),
+                        'return:' + changed.rows[0].id + ':refund-vendor-debit']
+                );
+            }
             if (refundStatus === 'processed') {
                 await client.query(
                     `UPDATE orders o SET
@@ -256,57 +289,6 @@ export function startPaystackWebhookWorker({ intervalMs = 5000 } = {}) {
     timer.unref();
     void run();
     return () => clearInterval(timer);
-}
-
-export async function stripeWebhook(req, res) {
-    let event;
-    try {
-        event = stripeClient().webhooks.constructEvent(
-            req.body,
-            req.headers['stripe-signature'],
-            process.env.STRIPE_WEBHOOK_SECRET
-        );
-    } catch {
-        return res.sendStatus(400);
-    }
-    try {
-        if (event.type === 'payment_intent.succeeded')
-            await Payment.settle('stripe', event.data.object, event.id);
-        if (event.type === 'refund.updated') {
-            const refund = event.data.object;
-            const reference = refund.metadata?.refund_reference;
-            if (reference) {
-                const status = refund.status === 'succeeded'
-                    ? 'processed'
-                    : refund.status === 'failed' || refund.status === 'canceled'
-                      ? 'failed'
-                      : 'queued';
-                await transaction(pool, async (client) => {
-                    const { rows } = await client.query(
-                        `UPDATE order_refunds SET status = $2, provider_ref = $3,
-                            updated_at = NOW(),
-                            processed_at = CASE WHEN $2 = 'processed' THEN NOW() ELSE processed_at END
-                         WHERE refund_reference = $1 RETURNING return_id`,
-                        [reference, status, refund.id]
-                    );
-                    if (!rows[0]) return;
-                    const changed = await client.query(
-                        `UPDATE returns SET refund_status = $2,
-                            refund_processed_at = CASE WHEN $2 = 'processed' THEN NOW() ELSE refund_processed_at END,
-                            status = CASE WHEN $2 = 'processed' AND status = 'processing' THEN 'completed' ELSE status END,
-                            completed_at = CASE WHEN $2 = 'processed' AND status = 'processing' THEN NOW() ELSE completed_at END,
-                            updated_at = NOW() WHERE id = $1 AND refund_status IS DISTINCT FROM $2 RETURNING *`,
-                        [rows[0].return_id, status]
-                    );
-                    if (changed.rows[0]) await notifyReturn(client, changed.rows[0], changed.rows[0].status);
-                });
-            }
-        }
-        return res.sendStatus(200);
-    } catch (error) {
-        console.error('Stripe webhook processing failed:', error.message);
-        return res.sendStatus(500);
-    }
 }
 
 export async function shipBubbleWebhook(req, res) {

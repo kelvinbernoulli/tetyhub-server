@@ -202,8 +202,8 @@ test('money is exact and unsupported currencies fail closed', () => {
     assert.equal(minorUnits('0.29'), 29);
     for (const value of ['-1', '1.001', 'Infinity', '1e3'])
         assert.throws(() => minorUnits(value));
-    assert.throws(() => assertGatewayCurrency('stripe', 'NGN'));
-    assert.throws(() => assertGatewayCurrency('stripe', 'JPY'));
+    assert.throws(() => assertGatewayCurrency('paystack', 'USD'));
+    assert.throws(() => assertGatewayCurrency('cash', 'NGN'));
 });
 test('shipping requires configured destination and charges each vendor once', () => {
     const items = [

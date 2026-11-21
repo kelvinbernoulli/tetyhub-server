@@ -33,9 +33,9 @@ test('PostgreSQL transaction history scopes mixed orders and bookings without le
         await db.query(await readFile(new URL('../prisma/migrations/20260925140000_restore_booking_payment_history/migration.sql', import.meta.url), 'utf8'));
         await db.query(`
             INSERT INTO payments (user_id,order_id,booking_id,vendor_id,gateway,gateway_ref,amount,currency_id,status,checkout_data,meta)
-            VALUES (2,1,NULL,NULL,'stripe','order-1',100,1,'success','private secret','private metadata'),
-                   (2,NULL,1,5,'stripe','booking-1',25,1,'success','private secret','private metadata'),
-                   (9,2,NULL,NULL,'stripe','order-2',40,1,'pending','private secret','private metadata');
+            VALUES (2,1,NULL,NULL,'paystack','order-1',100,1,'success','private secret','private metadata'),
+                   (2,NULL,1,5,'paystack','booking-1',25,1,'success','private secret','private metadata'),
+                   (9,2,NULL,NULL,'paystack','order-2',40,1,'pending','private secret','private metadata');
         `);
         t.mock.method(pool, 'query', (...args) => db.query(...args));
         const own = await TransactionHistory.fetchTransactions(2);

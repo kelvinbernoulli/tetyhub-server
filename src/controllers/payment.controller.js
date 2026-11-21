@@ -22,11 +22,11 @@ export const initiatePayment = async (req, res) => {
             return respondWithError(res, 400, 'Invalid order ID');
         const { gateway } = body;
 
-        if (!['paystack', 'stripe'].includes(gateway)) {
+        if (gateway !== 'paystack') {
             return respondWithError(
                 res,
                 400,
-                'Invalid gateway. Use paystack or stripe',
+                'Invalid gateway. Use paystack',
                 ERROR_CODES.VALIDATION_ERROR
             );
         }

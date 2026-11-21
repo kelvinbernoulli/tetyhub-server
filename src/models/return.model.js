@@ -2,11 +2,13 @@ import { randomUUID } from 'node:crypto';
 import pool from '#services/pg_pool.js';
 import Payment from '#models/payment.model.js';
 import { notifyReturn } from '#services/notifications.js';
+import { normalizeReturnRequest } from '#utils/return-policy.js';
 
 const CHANGE_OF_MIND_WINDOW_DAYS = 7;
 const REFUNDABLE_CLAIMS = new Set([
     'defective_or_unsafe',
     'wrong_item',
+    'vendor_fault',
     'misdescribed',
     'unsuitable_for_stated_purpose',
 ]);
@@ -27,17 +29,32 @@ const returnSelect = `
         COALESCE((SELECT jsonb_agg(jsonb_build_object(
             'id', ri.id, 'order_item_id', ri.order_item_id,
             'quantity', ri.quantity, 'condition', ri.condition,
-            'product_name', oi.product_name, 'unit_price', oi.price
+            'product_name', p.name, 'unit_price', oi.price
         ) ORDER BY ri.id)
-        FROM return_items ri JOIN order_items oi ON oi.id = ri.order_item_id
+        FROM return_items ri
+        JOIN order_items oi ON oi.id = ri.order_item_id
+        LEFT JOIN products p ON p.id = oi.product_id
         WHERE ri.return_id = r.id), '[]'::jsonb) AS items
     FROM returns r`;
 
 const terminalFilter = `r.status NOT IN ('rejected', 'cancelled')`;
+const customerPrivateFields = new Set([
+    'vendor_reserve_amount',
+    'admin_notes',
+    'vendor_notes',
+    'vendor_settings_id',
+    'vendor_settingsId',
+]);
+
+function toCustomerReturnDTO(returnRequest) {
+    if (!returnRequest) return returnRequest;
+    return Object.fromEntries(
+        Object.entries(returnRequest).filter(([field]) => !customerPrivateFields.has(field))
+    );
+}
 
 class Return {
     static async createReturnRequest(orderId, userId, returnData) {
-        console.log('returnData', returnData);
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
@@ -62,10 +79,13 @@ class Return {
             }
 
             const orderItemsResult = await client.query(
-                `SELECT oi.*, s.actual_delivery, s.status AS shipment_status
+                `SELECT oi.*, p.name AS product_name,
+                        s.actual_delivery, s.status AS shipment_status
                  FROM order_items oi
+                 LEFT JOIN products p ON p.id = oi.product_id
                  LEFT JOIN LATERAL (
-                    SELECT actual_delivery, status FROM shipments
+                    SELECT COALESCE(actual_delivery, updated_at) AS actual_delivery, status
+                    FROM shipments
                     WHERE order_id = oi.order_id AND vendor_id = oi.vendor_id
                     ORDER BY (status = 'delivered') DESC, actual_delivery DESC NULLS LAST, id DESC
                     LIMIT 1
@@ -86,6 +106,15 @@ class Return {
                 return { error: 'Submit separate return requests for items from different vendors', code: 422 };
             }
             const vendorId = orderItemsResult.rows[0].vendor_id;
+            const vendorFulfillment = (await client.query(
+                `SELECT id, gross_amount, net_amount FROM vendor_order_fulfillments
+                 WHERE order_id = $1 AND vendor_id = $2 FOR UPDATE`,
+                [orderId, vendorId]
+            )).rows[0];
+            if (!vendorFulfillment || Number(vendorFulfillment.gross_amount) <= 0) {
+                await client.query('ROLLBACK');
+                return { error: 'Unable to calculate the vendor payout for these items', code: 409 };
+            }
             const deliveredAt = orderItemsResult.rows.reduce((latest, item) => {
                 if (item.shipment_status !== 'delivered' || !item.actual_delivery) return latest;
                 const date = new Date(item.actual_delivery);
@@ -93,10 +122,10 @@ class Return {
             }, null);
             if (!deliveredAt) {
                 await client.query('ROLLBACK');
-                return { error: 'Return requests are available after delivery is confirmed', code: 422 };
+                return { error: 'Return requests are available after the vendor shipment is marked delivered', code: 422 };
             }
 
-            const claimType = returnData.reason_type;
+            const claimType = normalizeReturnRequest(returnData).reason_type;
             const deadline = new Date(deliveredAt);
             if (REFUNDABLE_CLAIMS.has(claimType)) {
                 // Use calendar months for the statutory window; months are not always 30 days.
@@ -134,6 +163,22 @@ class Return {
                 requestedItems.push({ item, requested });
             }
 
+            const returnedGross = requestedItems.reduce((sum, { item, requested }) =>
+                sum + (Number(item.subtotal) / Number(item.quantity)) * Number(requested.quantity), 0);
+            const { rows: [reserved] } = await client.query(
+                `SELECT COALESCE(SUM(vendor_reserve_amount), 0)::numeric AS amount
+                 FROM returns WHERE order_id = $1 AND vendor_id = $2
+                   AND status NOT IN ('rejected', 'cancelled')`,
+                [orderId, vendorId]
+            );
+            const vendorNet = Number(vendorFulfillment.net_amount);
+            const vendorGross = Number(vendorFulfillment.gross_amount);
+            const remainingVendorNet = Math.max(0, vendorNet - Number(reserved.amount));
+            const vendorReserveAmount = Math.min(
+                remainingVendorNet,
+                Math.round((returnedGross * vendorNet / vendorGross) * 100) / 100
+            );
+
             // Allocate order-level discount to physical products, then tax to the discounted value.
             const allItemResult = await client.query(
                 `SELECT COALESCE(SUM(subtotal), 0)::numeric AS subtotal
@@ -163,12 +208,13 @@ class Return {
             const { rows: [returnRequest] } = await client.query(
                 `INSERT INTO returns
                  (order_id, user_id, vendor_id, reason, description, reason_type,
-                  return_type, refund_amount, refund_status, delivered_at,
-                  return_window_expires_at, policy_version, status)
-                 VALUES ($1,$2,$3,$4,$5,$6,'refund',$7,'not_requested',$8,$9,'2026-11-12','pending')
+                  return_type, refund_amount, vendor_reserve_amount, refund_status, delivered_at,
+                  return_window_expires_at, policy_version, status, evidence)
+                 VALUES ($1,$2,$3,$4,$5,$6,'refund',$7,$8,'pending',$9,$10,'2026-11-12','pending',$11::jsonb)
                  RETURNING *`,
                 [orderId, userId, vendorId, returnData.reason, returnData.description ?? null,
-                    claimType, roundedRefund, deliveredAt, deadline]
+                    claimType, roundedRefund, vendorReserveAmount, deliveredAt, deadline,
+                    returnData.evidence === undefined ? null : JSON.stringify(returnData.evidence)]
             );
 
             for (const { item, requested } of requestedItems) {
@@ -178,19 +224,58 @@ class Return {
                     [returnRequest.id, item.id, requested.quantity, requested.condition ?? null]
                 );
             }
-            await client.query(
-                `UPDATE vendor_order_fulfillments SET payout_status = 'disputed', updated_at = NOW()
-                 WHERE order_id = $1 AND vendor_id = $2 AND payout_status IN ('held','eligible')`,
-                [orderId, vendorId]
-            );
+            if (vendorReserveAmount > 0) {
+                await client.query(
+                    `INSERT INTO ledger_entries
+                     (vendor_id, order_id, fulfillment_id, currency_id, entry_type, amount,
+                      idempotency_key, metadata)
+                     SELECT $1, $2, id, $3, 'vendor_return_reserve', -($4::numeric),
+                            $5, jsonb_build_object('return_id', $6::integer)
+                     FROM vendor_order_fulfillments WHERE order_id = $2 AND vendor_id = $1
+                     ON CONFLICT (idempotency_key) DO NOTHING`,
+                    [vendorId, orderId, order.currency_id, vendorReserveAmount,
+                        `return:${returnRequest.id}:vendor-reserve`, returnRequest.id]
+                );
+                await client.query(
+                    `INSERT INTO vendor_ledger_entries
+                     (vendor_id, order_id, fulfillment_id, currency_id, entry_type, amount_minor, idempotency_key, metadata)
+                     VALUES ($1,$2,$3,$4,'vendor_return_reserve',-$5,$6,$7)
+                     ON CONFLICT (idempotency_key) DO NOTHING`,
+                    [vendorId, orderId, vendorFulfillment.id, order.currency_id,
+                        Math.round(vendorReserveAmount * 100), 'return:' + returnRequest.id + ':minor-reserve',
+                        JSON.stringify({ return_id: returnRequest.id })]
+                );
+                await client.query(
+                    `WITH pending_payouts AS (
+                        SELECT id, amount,
+                               COALESCE(SUM(amount) OVER (
+                                   ORDER BY created_at DESC, id DESC
+                                   ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+                               ), 0) AS prior_amount
+                        FROM vendor_payouts
+                        WHERE fulfillment_id = $1 AND status = 'pending'
+                     )
+                     UPDATE vendor_payouts p
+                     SET amount = GREATEST(
+                         p.amount - GREATEST($2 - pending_payouts.prior_amount, 0), 0
+                     ),
+                     status = CASE
+                         WHEN p.amount <= GREATEST($2 - pending_payouts.prior_amount, 0)
+                         THEN 'cancelled' ELSE p.status
+                     END
+                     FROM pending_payouts
+                     WHERE p.id = pending_payouts.id`,
+                    [vendorFulfillment.id, vendorReserveAmount]
+                );
+            }
             await notifyReturn(client, returnRequest, 'pending', { vendors: true });
             await client.query('COMMIT');
-            return { ...returnRequest, items: requestedItems.map(({ item, requested }) => ({
+            return toCustomerReturnDTO({ ...returnRequest, items: requestedItems.map(({ item, requested }) => ({
                 order_item_id: item.id,
                 product_name: item.product_name,
                 quantity: requested.quantity,
                 condition: requested.condition ?? null,
-            })) };
+            })) });
         } catch (error) {
             await client.query('ROLLBACK');
             console.error('Error creating return request:', error.message);
@@ -258,6 +343,40 @@ class Return {
                 [returnId, nextStatus, notes, vendorId !== null, evidence === undefined ? null : JSON.stringify(evidence)]
             );
             returnRequest = updated.rows[0];
+            if (
+                ['rejected', 'cancelled'].includes(nextStatus) &&
+                Number(returnRequest.vendor_reserve_amount) > 0
+            ) {
+                const fulfillment = (await client.query(
+                    `SELECT vof.id, o.currency_id
+                     FROM vendor_order_fulfillments vof
+                     JOIN orders o ON o.id = vof.order_id
+                     WHERE vof.order_id = $1 AND vof.vendor_id = $2
+                     FOR UPDATE OF vof`,
+                    [returnRequest.order_id, returnRequest.vendor_id]
+                )).rows[0];
+                await client.query(
+                    `INSERT INTO ledger_entries
+                     (vendor_id, order_id, fulfillment_id, currency_id, entry_type, amount,
+                      idempotency_key, metadata)
+                     VALUES ($1, $2, $3, $4, 'vendor_return_reserve_release', $5, $6,
+                             jsonb_build_object('return_id', $7))
+                     ON CONFLICT (idempotency_key) DO NOTHING`,
+                    [returnRequest.vendor_id, returnRequest.order_id, fulfillment.id,
+                        fulfillment.currency_id, returnRequest.vendor_reserve_amount,
+                        `return:${returnId}:vendor-reserve-release`, returnId]
+                );
+                await client.query(
+                    `INSERT INTO vendor_ledger_entries
+                     (vendor_id, order_id, fulfillment_id, currency_id, entry_type, amount_minor, idempotency_key, metadata)
+                     VALUES ($1,$2,$3,$4,'vendor_return_reserve_release',ROUND($5::numeric * 100)::bigint,$6,$7)
+                     ON CONFLICT (idempotency_key) DO NOTHING`,
+                    [returnRequest.vendor_id, returnRequest.order_id, fulfillment.id,
+                        fulfillment.currency_id, returnRequest.vendor_reserve_amount,
+                        'return:' + returnId + ':minor-reserve-release', JSON.stringify({ return_id: returnId })]
+                );
+            }
+
             if (nextStatus !== rows.rows[0].status || notes || evidence !== undefined) {
                 await notifyReturn(client, returnRequest, nextStatus, { vendors: adminId !== null });
             }
@@ -288,7 +407,7 @@ class Return {
         if (userId !== null) { values.push(userId); conditions.push(`r.user_id = $${values.length}`); }
         if (vendorId !== null) { values.push(vendorId); conditions.push(`r.vendor_id = $${values.length}`); }
         const { rows } = await pool.query(`${returnSelect} WHERE ${conditions.join(' AND ')}`, values);
-        return rows[0] ?? null;
+        return userId !== null ? toCustomerReturnDTO(rows[0] ?? null) : rows[0] ?? null;
     }
 
     static async getReturnsByOrderId(orderId, userId = null, vendorId = null) {
@@ -297,7 +416,7 @@ class Return {
         if (userId !== null) { values.push(userId); conditions.push(`r.user_id = $${values.length}`); }
         if (vendorId !== null) { values.push(vendorId); conditions.push(`r.vendor_id = $${values.length}`); }
         const { rows } = await pool.query(`${returnSelect} WHERE ${conditions.join(' AND ')} ORDER BY r.created_at DESC`, values);
-        return rows;
+        return userId !== null ? rows.map(toCustomerReturnDTO) : rows;
     }
 
     static async getCustomerReturns(userId, { status, offset = 0, limit = 40 } = {}) {
@@ -309,7 +428,7 @@ class Return {
             `${returnSelect} WHERE ${where} ORDER BY r.created_at DESC LIMIT $${values.length - 1} OFFSET $${values.length}`,
             values
         );
-        return rows;
+        return rows.map(toCustomerReturnDTO);
     }
 
     static async getVendorReturns(vendorId, { status, offset = 0, limit = 40 } = {}) {
@@ -321,8 +440,10 @@ class Return {
             `SELECT r.*, u.firstname, u.lastname, u.email, o.total AS order_total,
              COALESCE((SELECT jsonb_agg(jsonb_build_object(
                 'id', ri.id, 'order_item_id', ri.order_item_id, 'quantity', ri.quantity,
-                'condition', ri.condition, 'product_name', oi.product_name, 'unit_price', oi.price
-             ) ORDER BY ri.id) FROM return_items ri JOIN order_items oi ON oi.id = ri.order_item_id
+                'condition', ri.condition, 'product_name', p.name, 'unit_price', oi.price
+             ) ORDER BY ri.id) FROM return_items ri
+             JOIN order_items oi ON oi.id = ri.order_item_id
+             LEFT JOIN products p ON p.id = oi.product_id
              WHERE ri.return_id = r.id), '[]'::jsonb) AS items
              FROM returns r JOIN users u ON u.id = r.user_id JOIN orders o ON o.id = r.order_id
              WHERE ${where} ORDER BY r.created_at DESC LIMIT $${values.length - 1} OFFSET $${values.length}`,
@@ -343,8 +464,10 @@ class Return {
              o.total AS order_total, o.status AS order_status,
              COALESCE((SELECT jsonb_agg(jsonb_build_object(
                 'id', ri.id, 'order_item_id', ri.order_item_id, 'quantity', ri.quantity,
-                'condition', ri.condition, 'product_name', oi.product_name, 'unit_price', oi.price
-             ) ORDER BY ri.id) FROM return_items ri JOIN order_items oi ON oi.id = ri.order_item_id
+                'condition', ri.condition, 'product_name', p.name, 'unit_price', oi.price
+             ) ORDER BY ri.id) FROM return_items ri
+             JOIN order_items oi ON oi.id = ri.order_item_id
+             LEFT JOIN products p ON p.id = oi.product_id
              WHERE ri.return_id = r.id), '[]'::jsonb) AS items
              FROM returns r JOIN users u ON u.id = r.user_id
              JOIN orders o ON o.id = r.order_id LEFT JOIN vendors v ON v.id = r.vendor_id

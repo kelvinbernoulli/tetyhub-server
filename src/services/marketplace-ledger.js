@@ -8,8 +8,7 @@ export async function recordProductSale(client, orderId) {
          FROM vendor_order_fulfillments vof
          JOIN orders o ON o.id = vof.order_id
          WHERE vof.order_id = $1
-         ON CONFLICT (idempotency_key) DO NOTHING`,
-        [orderId]
+         ON CONFLICT (idempotency_key) DO NOTHING`, [orderId]
     );
     await client.query(
         `INSERT INTO ledger_entries
@@ -20,7 +19,39 @@ export async function recordProductSale(client, orderId) {
          FROM vendor_order_fulfillments vof
          JOIN orders o ON o.id = vof.order_id
          WHERE vof.order_id = $1
-         ON CONFLICT (idempotency_key) DO NOTHING`,
-        [orderId]
+         ON CONFLICT (idempotency_key) DO NOTHING`, [orderId]
+    );
+    await client.query(
+        `INSERT INTO vendor_ledger_entries
+         (vendor_id, order_id, fulfillment_id, currency_id, entry_type, amount_minor, idempotency_key, metadata)
+         SELECT vof.vendor_id, vof.order_id, vof.id, o.currency_id,
+                'vendor_sale_credit', ROUND(vof.gross_amount * 100)::bigint,
+                'sale:' || vof.order_id || ':' || vof.id || ':gross-credit',
+                jsonb_build_object('source', 'payment_settlement')
+         FROM vendor_order_fulfillments vof JOIN orders o ON o.id = vof.order_id
+         WHERE vof.order_id = $1 AND vof.gross_amount > 0
+         ON CONFLICT (idempotency_key) DO NOTHING`, [orderId]
+    );
+    await client.query(
+        `INSERT INTO vendor_ledger_entries
+         (vendor_id, order_id, fulfillment_id, currency_id, entry_type, amount_minor, idempotency_key, metadata)
+         SELECT vof.vendor_id, vof.order_id, vof.id, o.currency_id,
+                'platform_commission_debit', -ROUND(vof.commission_amount * 100)::bigint,
+                'sale:' || vof.order_id || ':' || vof.id || ':commission-debit',
+                jsonb_build_object('source', 'payment_settlement')
+         FROM vendor_order_fulfillments vof JOIN orders o ON o.id = vof.order_id
+         WHERE vof.order_id = $1 AND vof.commission_amount > 0
+         ON CONFLICT (idempotency_key) DO NOTHING`, [orderId]
+    );
+    await client.query(
+        `INSERT INTO vendor_ledger_entries
+         (vendor_id, order_id, fulfillment_id, currency_id, entry_type, amount_minor, idempotency_key, metadata)
+         SELECT vof.vendor_id, vof.order_id, vof.id, o.currency_id,
+                'payout_hold', -ROUND(vof.net_amount * 100)::bigint,
+                'sale:' || vof.order_id || ':' || vof.id || ':payout-hold',
+                jsonb_build_object('source', 'delivery_return_hold')
+         FROM vendor_order_fulfillments vof JOIN orders o ON o.id = vof.order_id
+         WHERE vof.order_id = $1 AND vof.net_amount > 0
+         ON CONFLICT (idempotency_key) DO NOTHING`, [orderId]
     );
 }

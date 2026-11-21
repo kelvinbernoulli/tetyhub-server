@@ -1,55 +1,36 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-    buildVendorPayoutsFromFulfillments,
-    processPendingVendorPayouts,
-    settleVendorPayouts,
+    canCreatePayoutBatch,
+    normalizePayoutPreferences,
 } from '#services/vendor-payout.service.js';
 
-test('eligible vendor fulfillments become pending payout records', () => {
-    const rows = [
-        { id: 1, vendor_id: 10, order_id: 22, net_amount: 5000, payout_status: 'eligible' },
-        { id: 2, vendor_id: 10, order_id: 23, net_amount: 1500, payout_status: 'held' },
-        { id: 3, vendor_id: 12, order_id: 24, net_amount: 8200, payout_status: 'eligible' },
-    ];
-
-    const result = buildVendorPayoutsFromFulfillments(rows);
-
-    assert.deepEqual(result, [
-        { fulfillment_id: 1, vendor_id: 10, order_id: 22, amount: 5000, status: 'pending' },
-        { fulfillment_id: 3, vendor_id: 12, order_id: 24, amount: 8200, status: 'pending' },
-    ]);
+test('manual payout mode permits vendor-requested batches only', () => {
+    assert.equal(canCreatePayoutBatch({ payout_mode: 'manual' }, { onDemand: true }), true);
+    assert.equal(canCreatePayoutBatch({ payout_mode: 'manual' }), false);
+    assert.equal(canCreatePayoutBatch({ payout_mode: 'automatic', next_payout_at: new Date(0) }, { onDemand: true }), false);
 });
 
-test('pending vendor payouts can advance to processing', () => {
-    const payouts = [
-        { id: 101, vendor_id: 10, amount: 5000, status: 'pending' },
-        { id: 102, vendor_id: 10, amount: 1500, status: 'paid' },
-        { id: 103, vendor_id: 12, amount: 8200, status: 'pending' },
-    ];
-
-    const result = processPendingVendorPayouts(payouts);
-
-    assert.deepEqual(result, [
-        { id: 101, vendor_id: 10, amount: 5000, status: 'processing' },
-        { id: 103, vendor_id: 12, amount: 8200, status: 'processing' },
-    ]);
+test('automatic payout batches are allowed only at or after the saved due time', () => {
+    const now = new Date('2026-11-21T12:00:00.000Z');
+    assert.equal(canCreatePayoutBatch({ payout_mode: 'automatic', next_payout_at: '2026-11-21T11:59:00.000Z' }, { now }), true);
+    assert.equal(canCreatePayoutBatch({ payout_mode: 'automatic', next_payout_at: '2026-11-21T12:01:00.000Z' }, { now }), false);
+    assert.equal(canCreatePayoutBatch({ payout_mode: 'automatic', next_payout_at: null }, { now }), false);
 });
 
-test('processing payouts can be settled as paid', () => {
-    const payouts = [
-        { id: 201, vendor_id: 10, amount: 5000, status: 'processing' },
-        { id: 202, vendor_id: 10, amount: 1500, status: 'paid' },
-        { id: 203, vendor_id: 12, amount: 8200, status: 'processing' },
-    ];
-
-    const result = settleVendorPayouts(payouts);
-    const newlyPaid = result.filter(
-        (row) => row.status === 'paid' && row.id !== 202
+test('payout preferences accept manual or automatic mode with the supported intervals', () => {
+    const current = { payout_mode: 'manual', payout_cadence: 'weekly' };
+    assert.deepEqual(
+        normalizePayoutPreferences(current, { payoutMode: 'automatic', payoutCadence: 'bi_weekly' }),
+        {
+            payoutMode: 'automatic',
+            payoutCadence: 'bi_weekly',
+            minimumPayoutMinor: undefined,
+            resetSchedule: true,
+        }
     );
-
-    assert.equal(result.filter((row) => row.status === 'paid').length, 3);
-    assert.equal(newlyPaid.length, 2);
-    assert.ok(newlyPaid.every((row) => row.paid_at instanceof Date));
-    assert.equal(result.find((row) => row.id === 202)?.status, 'paid');
+    assert.equal(normalizePayoutPreferences(current, { minimumPayoutMinor: 5000 }).resetSchedule, false);
+    assert.throws(() => normalizePayoutPreferences(current, { payoutMode: 'scheduled' }), /payout_mode must be manual or automatic/);
+    assert.throws(() => normalizePayoutPreferences(current, { payoutCadence: 'daily' }), /payout_cadence must be weekly, bi_weekly, or monthly/);
+    assert.throws(() => normalizePayoutPreferences(current, { minimumPayoutMinor: -1 }), /minimum_payout_minor must be a non-negative integer/);
 });
