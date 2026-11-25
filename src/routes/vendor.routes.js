@@ -12,6 +12,7 @@ import * as TransactionHistoryController from "#controllers/transaction.history.
 import * as AdminTypesController from "#controllers/admin.type.controller.js";
 import * as CouponsController from "#controllers/coupon.controller.js";
 import * as ServicesController from "#controllers/services.controller.js";
+import * as PayoutController from '#controllers/payout.controller.js';
 import pagination from "#middlewares/pagination.middleware.js";
 import { Router } from "express";
 import {
@@ -88,6 +89,17 @@ router.get('/payment/verify/:reference', canRead('payments'), PaymentController.
 
 //transactions
 router.get('/transactions', canRead('transactions'), pagination, TransactionHistoryController.getVendorTransactions);
+
+//payouts
+router.get('/payouts', canRead('payouts'), PayoutController.getDashboard);
+router.get('/payouts/preferences', canRead('payouts'), PayoutController.getPreferences);
+router.get('/payouts/banks', canRead('payouts'), PayoutController.getBanks);
+router.post('/payouts/account/verify', canUpdate('payouts'), PayoutController.verifyBankAccount);
+router.patch('/payouts/preferences', canUpdate('payouts'), requireRecentAuthentication(), PayoutController.updatePreferences);
+router.put('/payouts/account', canUpdate('payouts'), requireRecentAuthentication(), PayoutController.setBankAccount);
+router.post('/payouts/request', canCreate('payouts'), requireRecentAuthentication(), PayoutController.requestPayout);
+router.get('/payouts/ledger', canRead('payouts'), pagination, PayoutController.getLedger);
+router.get('/payouts/history', canRead('payouts'), pagination, PayoutController.getHistory);
 
 //dashboard
 router.get("/dashboard/overview", canRead('dashboard'), VendorController.getDashboard);

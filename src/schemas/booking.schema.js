@@ -13,9 +13,9 @@ const scheduled = Joi.string()
 export const createBookingSchema = Joi.object({
     service_id: bookingIdSchema,
     scheduled_for: scheduled,
-    gateway: Joi.string().valid('paystack', 'stripe').required(),
+    gateway: Joi.string().valid('paystack').required(),
     expected_currency: Joi.string()
-        .valid('NGN', 'USD', 'EUR', 'GBP')
+        .valid('NGN')
         .required(),
     expected_total: Joi.number()
         .positive()

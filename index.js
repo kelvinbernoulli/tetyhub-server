@@ -19,8 +19,8 @@ import admin from '#routes/admin.routes.js';
 // import user from "#routes/user.routes.js";
 import vendor from '#routes/vendor.routes.js';
 import web from '#routes/web.routes.js';
-import { paystackWebhook, stripeWebhook } from '#services/webhook.js';
-import { startCheckoutWorker } from '#services/checkout.worker.js';
+import { paystackWebhook } from '#services/webhook.js';
+import { startPayoutWorker } from '#services/payout.worker.js';
 import passport from 'passport';
 import sessionMiddleware from '#config/session.js';
 
@@ -86,12 +86,6 @@ app.post(
     express.raw({ type: 'application/json', limit: '1mb' }),
     paystackWebhook
 );
-app.post(
-    '/v1/api/webhook/stripe',
-    express.raw({ type: 'application/json', limit: '1mb' }),
-    stripeWebhook
-);
-
 // Parsing
 app.use(cookieParser());
 app.use(sessionMiddleware);
@@ -155,20 +149,17 @@ app.use((err, req, res, next) => {
 });
 
 // Startup
-// const stopCheckoutWorker = startCheckoutWorker();
-// const shutdown = (signal) => {
-//     stopCheckoutWorker();
-//     console.log(`${signal} received: closing server`);
-//     server.close(() => {
-//         console.log('Server closed');
-//         process.exit(0);
-//     });
-// };
+const stopPayoutWorker = startPayoutWorker();
 
 const server = app.listen(PORT, () => {
     console.log(`Server running on port ${PORT} — http://localhost:${PORT}/`);
 });
 
+const shutdown = (signal) => {
+    stopPayoutWorker();
+    console.log(`${signal} received: closing server`);
+    server.close(() => process.exit(0));
+};
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
 

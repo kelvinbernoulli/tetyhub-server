@@ -7,6 +7,7 @@ import {
     minorUnits,
     assertGatewayCurrency,
 } from '#utils/checkout.js';
+import { recordBookingEarnings } from '#services/vendor-ledger.service.js';
 import { bookingPayable } from '#utils/booking.js';
 
 export default class BookingPayment {
@@ -85,23 +86,18 @@ export default class BookingPayment {
                     payment_reference: payment.gateway_ref,
                 },
             };
-            const response =
-                gateway === 'paystack'
-                    ? await this.gatewayApi.initializePaystack(args)
-                    : await this.gatewayApi.initializeStripe(args);
+            const response = await this.gatewayApi.initializePaystack(args);
             const result = {
                 booking_id: booking.id,
                 gateway,
                 reference: payment.gateway_ref,
-                ...(gateway === 'paystack'
-                    ? { authorization_url: response.authorization_url }
-                    : { client_secret: response.client_secret }),
+                authorization_url: response.authorization_url,
             };
             await pool.query(
                 `UPDATE payments SET provider_ref = $1, checkout_data = $2,
                 initializing_until = NULL, updated_at = NOW() WHERE id = $3`,
                 [
-                    gateway === 'paystack' ? payment.gateway_ref : response.id,
+                    payment.gateway_ref,
                     JSON.stringify(result),
                     payment.id,
                 ]
@@ -136,12 +132,9 @@ export default class BookingPayment {
     }
 
     static async settle(gateway, data, eventId = null) {
-        const reference =
-            gateway === 'paystack'
-                ? data.reference
-                : data.metadata?.payment_reference;
+        const reference = data.reference;
         if (
-            !['paystack', 'stripe'].includes(gateway) ||
+            gateway !== 'paystack' ||
             typeof reference !== 'string' ||
             !reference.startsWith('booking-')
         )
@@ -177,20 +170,11 @@ export default class BookingPayment {
                 !payment ||
                 payment.order_id != null ||
                 payment.user_id !== booking.user_id ||
-                payment.currency_id !== booking.currency_id ||
-                (gateway === 'stripe' &&
-                    (String(data.metadata?.booking_id) !== String(booking.id) ||
-                        (payment.provider_ref &&
-                            payment.provider_ref !== data.id)))
+                payment.currency_id !== booking.currency_id
             )
                 throw new CheckoutError('Payment identity mismatch', 409);
-            const success =
-                data.status ===
-                (gateway === 'paystack' ? 'success' : 'succeeded');
-            const amount =
-                gateway === 'stripe' && success
-                    ? data.amount_received
-                    : data.amount;
+            const success = data.status === 'success';
+            const amount = data.amount;
             if (
                 Number(amount) !== minorUnits(payment.amount) ||
                 minorUnits(payment.amount) !== minorUnits(booking.total) ||
@@ -225,7 +209,7 @@ export default class BookingPayment {
             await client.query(
                 `UPDATE payments SET status = 'success', provider_ref = $1, paid_at = NOW(),
                 initializing_until = NULL, updated_at = NOW() WHERE id = $2`,
-                [gateway === 'stripe' ? data.id : reference, payment.id]
+                [reference, payment.id]
             );
             await client.query(
                 `UPDATE service_bookings SET booking_status = $1, payment_status = 'paid',
@@ -248,6 +232,8 @@ export default class BookingPayment {
                     JSON.stringify({ booking_id: booking.id }),
                 ]
             );
+            if (status === 'confirmed')
+                await recordBookingEarnings(client, booking.id);
             return { booking_id: booking.id, payment_status: 'paid', status };
         });
     }

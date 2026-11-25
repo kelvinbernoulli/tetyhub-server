@@ -331,23 +331,6 @@ test('duplicate payment events do not send a second notification or update payme
         )
     );
 });
-test('Stripe settlement checks booking metadata and provider intent identity', async (t) => {
-    mockDb(t, (sql) =>
-        sql.startsWith('SELECT p.*')
-            ? { rows: [{ ...payment, provider_ref: 'pi_expected' }] }
-            : undefined
-    );
-    await assert.rejects(
-        BookingPayment.settle('stripe', {
-            id: 'pi_other',
-            metadata: { payment_reference: 'booking-test', booking_id: '9' },
-            status: 'succeeded',
-            amount_received: 2050,
-            currency: 'ngn',
-        }),
-        /identity/
-    );
-});
 test('saved payment initialization is reused without another gateway call', async (t) => {
     const saved = {
         reference: 'booking-test',

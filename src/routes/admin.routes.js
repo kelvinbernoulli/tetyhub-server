@@ -10,6 +10,7 @@ import * as ReturnController from "#controllers/return.controller.js";
 import * as CategoriesController from '#controllers/categories.controller.js'
 import * as SubcategoriesController from '#controllers/subcategories.controller.js'
 import * as ChildcategoriesController from '#controllers/childcategories.controller.js'
+import * as PayoutController from '#controllers/payout.controller.js';
 import pagination from "#middlewares/pagination.middleware.js";
 import { Router } from "express";
 import { authenticated, canCreate, canDelete, canRead, canUpdate, isAllAdmin, isSuperAdmin, requireCsrfProtection, requireRecentAuthentication } from "#middlewares/auth.middleware.js";
@@ -86,6 +87,11 @@ router.get("/permissions/:adminId", canRead('admins'), PermissionsController.fet
 
 //transactions
 router.get("/transactions", canRead('transactions'), pagination, TransactionHistoryController.getAllTransactions);
+
+//vendor payouts
+router.get('/payouts', canRead('payouts'), pagination, PayoutController.adminList);
+router.post('/payouts/:payoutId/retry', canUpdate('payouts'), requireRecentAuthentication(), PayoutController.retry);
+router.post('/payouts/vendors/:vendorId/tax-deductions', canCreate('payouts'), requireRecentAuthentication(), PayoutController.addTaxDeduction);
 
 //returns
 router.get("/returns", canRead('returns'), pagination, ReturnController.getAllReturns);

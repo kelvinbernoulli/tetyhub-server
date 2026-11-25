@@ -41,7 +41,7 @@ export const upsertCartSchema = Joi.object({
 
 export const checkoutSchema = Joi.object({
     expected_currency: Joi.string()
-        .valid('NGN', 'USD', 'EUR', 'GBP')
+        .valid('NGN')
         .required(),
     expected_total: Joi.number()
         .min(0)
@@ -49,7 +49,7 @@ export const checkoutSchema = Joi.object({
         .precision(2)
         .strict()
         .required(),
-    gateway: Joi.string().valid('paystack', 'stripe').required(),
+    gateway: Joi.string().valid('paystack').required(),
     idempotency_key: Joi.string().guid({ version: 'uuidv4' }).required(),
     firstname: Joi.string().trim().max(100).required().label('First Name'),
     lastname: Joi.string().trim().max(100).required().label('Last Name'),

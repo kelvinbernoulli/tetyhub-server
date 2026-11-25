@@ -63,6 +63,15 @@ test(
                     'utf8'
                 )
             );
+            await db.query(
+                await readFile(
+                    new URL(
+                        '../prisma/migrations/20261124000000_checkout_expiration_timestamptz/migration.sql',
+                        import.meta.url
+                    ),
+                    'utf8'
+                )
+            );
             await db.query(`INSERT INTO users(firstname,email) VALUES ('A','a@example.com'),('B','b@example.com');
             INSERT INTO vendors DEFAULT VALUES;
             INSERT INTO currencies(code) VALUES ('NGN');

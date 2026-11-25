@@ -94,6 +94,7 @@ model users {
   admin_assignments_created admins[]                 @relation("AdminCreatedBy")
   permission_grants_created admin_permissions[]      @relation("PermissionGrantedBy")
   admin_audit_logs          admin_audit_logs[]       @relation("AdminAuditActor")
+  payout_batches_created    payout_batches[]         @relation("PayoutBatchCreator")
 
   @@index([country_id])
 }
@@ -143,7 +144,17 @@ model vendors {
   postal_code         String?
   country_id          Int?
   verification_status String    @default("pending") // pending, verified, rejected
-  commission_rate     Float     @default(0)
+  commission_rate     Float     @default(0) // Legacy field; payout commission is read from the vendor's subscription plan.
+  payout_mode         String    @default("manual")
+  payout_interval     String?
+  payout_next_at      DateTime? @db.Timestamptz(3)
+  paystack_recipient_code String?
+  payout_account_name String?
+  payout_bank_code    String?
+  payout_bank_name    String?
+  payout_account_last4 String?
+  payout_currency     String    @default("NGN") @db.Char(3)
+  payout_verified_at  DateTime? @db.Timestamptz(3)
   status              String    @default("active") // active, inactive, suspended
   created_at          DateTime  @default(now())
   updated_at          DateTime? @updatedAt
@@ -163,6 +174,9 @@ model vendors {
   admins           admins[]
   admin_audit_logs admin_audit_logs[]
   services         services[]
+  vendor_ledger_entries vendor_ledger_entries[]
+  payouts          payouts[]
+  payout_holds     vendor_payout_holds[]
 
   @@index([country_id])
 }
@@ -530,6 +544,7 @@ model orders {
   checkout_key     String?
   checkout_hash    String?
   contact_email    String?
+  delivered_at     DateTime? @db.Timestamptz(3)
   created_at       DateTime  @default(now())
   updated_at       DateTime? @updatedAt
 
@@ -545,6 +560,8 @@ model orders {
   coupon_usage          coupon_usage?
   status_history        order_status_history[]
   checkout_notification checkout_notifications?
+  vendor_ledger_entries vendor_ledger_entries[]
+  payout_holds         vendor_payout_holds[]
 
   @@unique([user_id, checkout_key])
   @@index([user_id, status])
@@ -573,6 +590,8 @@ model order_items {
   variant      product_variants? @relation(fields: [variant_id], references: [id])
   vendor       vendors           @relation(fields: [vendor_id], references: [id])
   return_items return_items[]
+  vendor_ledger_entries vendor_ledger_entries[]
+  payout_holds vendor_payout_holds[]
 
   // Performance Compound Indexes
   @@index([order_id])
@@ -934,12 +953,105 @@ model service_bookings {
   scheduled_for    DateTime @map("scheduled_for")
   booking_status   String   @default("pending") @map("booking_status") // pending, confirmed, active, completed, cancelled
   additional_notes String?  @map("additional_notes")
+  completed_at     DateTime? @db.Timestamptz(3)
 
   // Relations
   service services @relation(fields: [service_id], references: [id]) // Linked safely here
+  vendor_ledger_entries vendor_ledger_entries[]
 
   @@index([service_id, booking_status])
   @@map("service_bookings")
+}
+
+model payout_batches {
+  id                  Int       @id @default(autoincrement())
+  batch_key           String    @unique
+  mode                String
+  cadence             String?
+  status              String    @default("processing")
+  created_by_user_id  Int?
+  created_at          DateTime  @default(now()) @db.Timestamptz(3)
+  completed_at        DateTime? @db.Timestamptz(3)
+  payouts             payouts[]
+  created_by          users?    @relation("PayoutBatchCreator", fields: [created_by_user_id], references: [id], onDelete: SetNull)
+}
+
+model payouts {
+  id                     Int       @id @default(autoincrement())
+  batch_id               Int
+  vendor_id              Int
+  currency                String    @default("NGN") @db.Char(3)
+  amount_minor            BigInt
+  transfer_fee_minor      BigInt    @default(0)
+  transfer_reference      String    @unique
+  transfer_code           String?
+  status                  String    @default("pending")
+  attempt_count           Int       @default(0)
+  retryable               Boolean   @default(false)
+  last_error_code         String?
+  last_error_message      String?
+  created_at              DateTime  @default(now()) @db.Timestamptz(3)
+  updated_at              DateTime  @updatedAt @db.Timestamptz(3)
+  completed_at            DateTime? @db.Timestamptz(3)
+  batch                   payout_batches @relation(fields: [batch_id], references: [id], onDelete: Restrict)
+  vendor                  vendors   @relation(fields: [vendor_id], references: [id], onDelete: Restrict)
+  ledger_entries          vendor_ledger_entries[]
+  @@unique([batch_id, vendor_id])
+  @@index([vendor_id, created_at])
+  @@index([status, retryable, updated_at])
+}
+
+model vendor_ledger_entries {
+  id               BigInt    @id @default(autoincrement())
+  vendor_id        Int
+  order_id         Int?
+  order_item_id    Int?
+  booking_id       Int?
+  payout_id        Int?
+  entry_type       String
+  amount_minor     BigInt
+  currency         String    @default("NGN") @db.Char(3)
+  idempotency_key  String    @unique
+  available_at     DateTime? @db.Timestamptz(3)
+  metadata         Json?
+  created_at       DateTime  @default(now()) @db.Timestamptz(3)
+  vendor           vendors   @relation(fields: [vendor_id], references: [id], onDelete: Restrict)
+  order            orders?   @relation(fields: [order_id], references: [id], onDelete: Restrict)
+  order_item       order_items? @relation(fields: [order_item_id], references: [id], onDelete: Restrict)
+  booking          service_bookings? @relation(fields: [booking_id], references: [id], onDelete: Restrict)
+  payout           payouts?  @relation(fields: [payout_id], references: [id], onDelete: Restrict)
+  @@index([vendor_id, created_at])
+  @@index([vendor_id, available_at])
+  @@index([order_item_id])
+  @@index([booking_id])
+  @@map("vendor_ledger_entries")
+}
+
+model payout_webhook_events {
+  id                 BigInt   @id @default(autoincrement())
+  event_key          String   @unique
+  transfer_reference String?
+  event_type         String
+  received_at        DateTime @default(now()) @db.Timestamptz(3)
+  payload            Json?
+}
+
+model vendor_payout_holds {
+  id                  BigInt   @id @default(autoincrement())
+  vendor_id           Int
+  order_id            Int
+  order_item_id       Int
+  provider_dispute_id String
+  amount_minor        BigInt
+  currency            String   @db.Char(3)
+  status              String   @default("open")
+  created_at          DateTime @default(now()) @db.Timestamptz(3)
+  updated_at          DateTime @updatedAt @db.Timestamptz(3)
+  vendor              vendors @relation(fields: [vendor_id], references: [id], onDelete: Restrict)
+  order               orders @relation(fields: [order_id], references: [id], onDelete: Restrict)
+  order_item          order_items @relation(fields: [order_item_id], references: [id], onDelete: Restrict)
+  @@unique([provider_dispute_id, order_item_id])
+  @@index([vendor_id, status])
 }
 
 model coupon_usage {
