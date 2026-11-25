@@ -1,4 +1,3 @@
-import * as ReviewController from '#controllers/review.controller.js';
 import * as supportTicketsController from "#controllers/support.ticket.controller.js";
 import * as settingsController from "#controllers/settings.controller.js";
 import * as CountriesController from "#controllers/countries.controller.js";
@@ -7,26 +6,15 @@ import * as AdminTypesController from "#controllers/admin.type.controller.js";
 import * as AdminsController from "#controllers/admin.controller.js";
 import * as PermissionsController from "#controllers/permission.controller.js";
 import * as TransactionHistoryController from "#controllers/transaction.history.controller.js";
-import * as PayoutController from '#controllers/payout.controller.js';
-import * as CommissionController from "#controllers/commission.controller.js";
-import * as SubscriptionPlansController from "#controllers/subscription-plans.controller.js";
-import * as KYCController from '#controllers/kyc.controller.js';
-import * as ActivityController from '#controllers/activity.controller.js';
-import * as ShipbubbleLabelController from '#controllers/shipbubble-label.controller.js';
 import * as ReturnController from "#controllers/return.controller.js";
 import * as CategoriesController from '#controllers/categories.controller.js'
 import * as SubcategoriesController from '#controllers/subcategories.controller.js'
 import * as ChildcategoriesController from '#controllers/childcategories.controller.js'
-import * as OrderController from '#controllers/order.controller.js'
-import * as FAQController from '#controllers/faq.controller.js'
+import * as PayoutController from '#controllers/payout.controller.js';
 import pagination from "#middlewares/pagination.middleware.js";
 import { Router } from "express";
 import { authenticated, canCreate, canDelete, canRead, canUpdate, isAllAdmin, isSuperAdmin, requireCsrfProtection, requireRecentAuthentication } from "#middlewares/auth.middleware.js";
 const router = Router();
-const supportStaffContext = (req, res, next) => {
-    req.supportStaff = true;
-    next();
-};
 
 // The entire platform-admin surface is deny-by-default. Public storefront
 // reads live on web.routes.js.
@@ -68,24 +56,15 @@ router.patch("/childcategory/update/:ChildcategoryId", canUpdate('categories'), 
 router.delete("/childcategory/delete/:ChildcategoryId", canDelete('categories'), ChildcategoriesController.deleteChildcategory);
 
 //support tickets
-router.post("/support-tickets/create", canCreate('support'), supportStaffContext, supportTicketsController.createSupportTicket);
-router.patch("/support-tickets/:ticketId/reply", canUpdate('support'), supportStaffContext, supportTicketsController.replyToSupportTicket);
-router.get("/support-tickets", canRead('support'), supportStaffContext, pagination, supportTicketsController.fetchSupportTickets);
-router.get("/support-tickets/agents", canRead('support'), supportStaffContext, supportTicketsController.fetchSupportAgents);
-router.post("/support-tickets/:ticketId/transfer", canUpdate('support'), supportStaffContext, supportTicketsController.requestSupportTicketTransfer);
-router.patch("/support-tickets/:ticketId/transfer/decision", canUpdate('support'), supportStaffContext, supportTicketsController.respondToSupportTicketTransfer);
-router.patch("/support-tickets/:ticketId", canUpdate('support'), supportStaffContext, supportTicketsController.updateSupportTicket);
-router.get("/support-tickets/view/:ticketId", canRead('support'), supportStaffContext, supportTicketsController.getSupportTicket);
+router.post("/support-tickets/create", canCreate('support'), supportTicketsController.createSupportTicket);
+router.patch("/support-tickets/:ticketId/reply", canUpdate('support'), supportTicketsController.replyToSupportTicket);
+router.get("/support-tickets", canRead('support'), pagination, supportTicketsController.fetchSupportTickets);
+router.get("/support-tickets/view/:ticketId", canRead('support'), supportTicketsController.getSupportTicket);
 // router.delete("/support-tickets/:ticketId", authenticated, canDelete('support'), supportTicketsController.deleteGeneralSupportTicket);
 
 //settings
 router.get("/settings", canRead('settings'), pagination, settingsController.fetchGeneralSettings);
 router.patch("/settings/upsert", canUpdate('settings'), settingsController.upsertGeneralSettings);
-router.get("/commission-rates", canRead('settings'), CommissionController.getRates);
-router.patch("/commission-rates", canUpdate('settings'), requireRecentAuthentication(), CommissionController.updateRates);
-router.get("/commission-rates/history", canRead('settings'), pagination, CommissionController.getRateHistory);
-router.get("/subscription-plans", canRead('settings'), SubscriptionPlansController.list);
-router.patch("/subscription-plans/:plan", canUpdate('settings'), requireRecentAuthentication(), SubscriptionPlansController.publish);
 
 //admin types
 router.post("/admin-type/create", isSuperAdmin, requireRecentAuthentication(), AdminTypesController.createAdminTypes);
@@ -108,49 +87,14 @@ router.get("/permissions/:adminId", canRead('admins'), PermissionsController.fet
 
 //transactions
 router.get("/transactions", canRead('transactions'), pagination, TransactionHistoryController.getAllTransactions);
-router.get('/payouts', canRead('transactions'), pagination, PayoutController.listAdminPayouts);
-router.post('/payouts/:payoutId/retry', canUpdate('transactions'), requireRecentAuthentication(), PayoutController.retryPayout);
-router.post('/payouts/:payoutId/finalize', canUpdate('transactions'), requireRecentAuthentication(), PayoutController.finalizePayout);
-router.patch('/vendors/:vendorId/payout-tax-rate', canUpdate('transactions'), requireRecentAuthentication(), PayoutController.updateVendorTaxRate);
 
-// ShipBubble label booking failures on paid orders
-router.get(
-    "/shipbubble/label-issues",
-    canRead('orders'),
-    pagination,
-    ShipbubbleLabelController.getLabelBookingIssues
-);
-
-//orders
-router.get("/orders", canRead('orders'), pagination, OrderController.fetchAllOrders);
-router.get("/orders/view/:orderId", canRead('orders'), OrderController.getAdminOrderById);
-// router.patch("/orders/:orderId/shipbubble-label", canUpdate('orders'), requireRecentAuthentication(), OrderController.updateShipbubbleLabel);
+//vendor payouts
+router.get('/payouts', canRead('payouts'), pagination, PayoutController.adminList);
+router.post('/payouts/:payoutId/retry', canUpdate('payouts'), requireRecentAuthentication(), PayoutController.retry);
+router.post('/payouts/vendors/:vendorId/tax-deductions', canCreate('payouts'), requireRecentAuthentication(), PayoutController.addTaxDeduction);
 
 //returns
 router.get("/returns", canRead('returns'), pagination, ReturnController.getAllReturns);
 router.patch("/returns/:returnId", canUpdate('returns'), ReturnController.adminUpdateReturn);
-
-//faq
-router.post("/faq/create", FAQController.createFAQ);
-router.get("/faqs", pagination, FAQController.fetchFAQ);
-router.patch("/faq/update/:faqId", FAQController.updateFAQ);
-router.delete("/faq/delete/:faqId", FAQController.deleteFAQ);
-
-
-//reviews and ratings
-router.get('/reviews', canRead('reviews'), ReviewController.fetchAdminReviews);
-router.get('/reviews/:reviewId', canRead('reviews'), ReviewController.viewAdminReview);
-router.patch('/reviews/:reviewId/status', canRead('reviews'), canUpdate('reviews'), ReviewController.moderateReview);
-router.delete('/reviews/:reviewId', canRead('reviews'), canDelete('reviews'), ReviewController.deleteAdminReview);
-
-// KYC records contain government identifiers and verification documents.
-router.get('/kyc', isSuperAdmin, requireRecentAuthentication(), pagination, KYCController.fetchKYCSubmissions);
-router.get('/kyc/:id', isSuperAdmin, requireRecentAuthentication(), KYCController.viewKYCSubmission);
-router.patch('/kyc/status', isSuperAdmin, requireRecentAuthentication(), KYCController.updateKycStatus);
-
-// Audit logs can expose account and operational details; keep access restricted.
-router.get('/logs', isSuperAdmin, requireRecentAuthentication(), pagination, ActivityController.fetchAdminLogs);
-router.get('/logs/:id', isSuperAdmin, requireRecentAuthentication(), ActivityController.fetchAdminLogDetailById);
-router.get('/logs/:source/:id', isSuperAdmin, requireRecentAuthentication(), ActivityController.fetchAdminLogDetails);
 
 export default router;

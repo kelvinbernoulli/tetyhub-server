@@ -59,9 +59,7 @@ export function shippingMinor(
 }
 
 export function assertGatewayCurrency(gateway, currency) {
-    // Explicit launch currencies prevent accidentally interpreting yen as cents.
-    const supported = gateway === 'paystack' ? ['NGN'] : [];
-    if (!supported.includes(currency))
+    if (gateway !== 'paystack' || currency !== 'NGN')
         throw new CheckoutError(
             'Payment gateway does not support this order currency'
         );

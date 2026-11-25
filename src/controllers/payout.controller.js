@@ -1,111 +1,187 @@
-import { createPayoutBatch, createTransferRecipient, finalizeTransfer as finalizePayoutTransfer, getPayout, listAllPayouts, listPayouts as listVendorPayoutRecords, payoutSummary, retryFailedPayout, updatePayoutPreferences as savePayoutPreferences, updateVendorTaxRate as saveVendorTaxRate } from '#services/vendor-payout.service.js';
+import Payout from '#models/payout.model.js';
+import {
+    payoutAccountSchema,
+    payoutListSchema,
+    payoutPreferencesSchema,
+    payoutRequestSchema,
+    taxDeductionSchema,
+} from '#schemas/payout.schema.js';
 import ERROR_CODES from '#utils/error.codes.js';
 import { respondWithError, respondWithSuccess } from '#utils/response.js';
+import { minorUnits } from '#utils/checkout.js';
 
-const vendorId = (req) => {
-    const id = Number(req.auth?.vendorId ?? req.session?.user?.vendor_id);
-    if (!Number.isInteger(id) || id < 1) {
-        const error = new Error('Vendor authentication required.');
-        error.status = 403;
-        throw error;
-    }
-    return id;
+const fail = (res, error) => {
+    const status = error.status ?? error.response?.status ?? 500;
+    const message = status >= 500
+        ? 'Payout service is temporarily unavailable'
+        : error.response?.data?.message ?? error.message;
+    console.error('Payout request failed:', error.message);
+    return respondWithError(
+        res,
+        status,
+        message,
+        status === 400 ? ERROR_CODES.VALIDATION_ERROR :
+            status === 403 ? ERROR_CODES.FORBIDDEN :
+                status === 404 ? ERROR_CODES.RESOURCE_NOT_FOUND :
+                    status === 409 ? ERROR_CODES.RESOURCE_UPDATE_FAILED :
+                        ERROR_CODES.INTERNAL_SERVER_ERROR
+    );
 };
 
-const handleError = (res, error) => {
-    const status = error.status ?? 500;
-    return respondWithError(res, status, status < 500 ? error.message : 'Internal server error',
-        status < 500 ? ERROR_CODES.VALIDATION_ERROR : ERROR_CODES.INTERNAL_SERVER_ERROR);
+const validated = (schema, input) => {
+    const { error, value } = schema.validate(input, { abortEarly: false });
+    if (error) throw Object.assign(new Error(error.details[0].message), { status: 400 });
+    return value;
 };
 
-export const listPayouts = async (req, res) => {
+export const getDashboard = async (req, res) => {
     try {
-        return respondWithSuccess(res, 200, 'Payouts fetched successfully',
-            await listVendorPayoutRecords(vendorId(req), req.query));
-    } catch (error) { return handleError(res, error); }
-};
-
-export const getSummary = async (req, res) => {
-    try {
-        return respondWithSuccess(res, 200, 'Payout summary fetched successfully',
-            await payoutSummary(vendorId(req)));
-    } catch (error) { return handleError(res, error); }
-};
-
-export const createRecipient = async (req, res) => {
-    try {
-        const { account_name, account_number, bank_code, currency = 'NGN' } = req.body ?? {};
-        if (![account_name, account_number, bank_code].every((value) => typeof value === 'string' && value.trim()))
-            return respondWithError(res, 400, 'Account name, account number, and bank code are required.', ERROR_CODES.VALIDATION_ERROR);
-        const recipient = await createTransferRecipient(vendorId(req), {
-            name: account_name.trim(), accountNumber: account_number.trim(),
-            bankCode: bank_code.trim(), currency: String(currency).toUpperCase(),
+        const vendorId = req.auth.vendorId;
+        const [preferences, summary, payouts] = await Promise.all([
+            Payout.preferences(vendorId),
+            Payout.summary(vendorId),
+            Payout.history(vendorId, { limit: 10, offset: 0 }),
+        ]);
+        return respondWithSuccess(res, 200, 'Payout dashboard fetched successfully', {
+            preferences,
+            summary,
+            recent_payouts: payouts.items,
         });
-        return respondWithSuccess(res, 201, 'Payout recipient saved successfully', recipient);
-    } catch (error) { return handleError(res, error); }
+    } catch (error) {
+        return fail(res, error);
+    }
+};
+
+export const getPreferences = async (req, res) => {
+    try {
+        const result = await Payout.preferences(req.auth.vendorId);
+        return respondWithSuccess(res, 200, 'Payout preferences fetched successfully', result);
+    } catch (error) {
+        return fail(res, error);
+    }
+};
+
+export const getBanks = async (_req, res) => {
+    try {
+        const banks = await Payout.banks();
+        return respondWithSuccess(res, 200, 'Supported banks fetched successfully', banks);
+    } catch (error) {
+        return fail(res, error);
+    }
+};
+
+export const verifyBankAccount = async (req, res) => {
+    try {
+        const { account_number, bank_code } = validated(payoutAccountSchema, req.body);
+        const result = await Payout.verifyBankAccount({
+            accountNumber: account_number,
+            bankCode: bank_code,
+        });
+        return respondWithSuccess(res, 200, 'Bank account verified successfully', result);
+    } catch (error) {
+        return fail(res, error);
+    }
+};
+
+export const updatePreferences = async (req, res) => {
+    try {
+        const payload = validated(payoutPreferencesSchema, req.body);
+        const result = await Payout.updatePreferences(req.auth.vendorId, payload);
+        return respondWithSuccess(res, 200, 'Payout preferences updated successfully', result);
+    } catch (error) {
+        return fail(res, error);
+    }
+};
+
+export const setBankAccount = async (req, res) => {
+    try {
+        const { account_number, bank_code } = validated(payoutAccountSchema, req.body);
+        const result = await Payout.setBankAccount(req.auth.vendorId, {
+            accountNumber: account_number,
+            bankCode: bank_code,
+            email: req.auth.email,
+        });
+        return respondWithSuccess(res, 200, 'Payout bank account verified successfully', result);
+    } catch (error) {
+        return fail(res, error);
+    }
 };
 
 export const requestPayout = async (req, res) => {
     try {
-        const payouts = await createPayoutBatch(vendorId(req), { onDemand: true });
-        return respondWithSuccess(res, 202, 'Payout request queued', payouts);
-    } catch (error) { return handleError(res, error); }
+        const { amount } = validated(payoutRequestSchema, req.body ?? {});
+        const payout = await Payout.createForVendor(req.auth.vendorId, {
+            mode: 'manual',
+            createdByUserId: req.auth.userId,
+            amountMinor: amount == null ? null : minorUnits(amount),
+        });
+        if (!payout)
+            return respondWithError(res, 409, 'Available balance is below the minimum payout amount', ERROR_CODES.RESOURCE_UPDATE_FAILED);
+        return respondWithSuccess(res, 202, 'Payout request accepted', payout);
+    } catch (error) {
+        return fail(res, error);
+    }
 };
 
-export const getPayoutById = async (req, res) => {
+export const getLedger = async (req, res) => {
     try {
-        const safeId=Number(req.params.payoutId);
-        if(!Number.isSafeInteger(safeId)||safeId<1) return respondWithError(res,404,'Payout not found.',ERROR_CODES.RESOURCE_NOT_FOUND);
-        const payout = await getPayout(vendorId(req), safeId);
-        if (!payout) return respondWithError(res, 404, 'Payout not found.', ERROR_CODES.RESOURCE_NOT_FOUND);
-        return respondWithSuccess(res, 200, 'Payout fetched successfully', payout);
-    } catch (error) { return handleError(res, error); }
+        const query = validated(payoutListSchema, req.query);
+        const result = await Payout.ledger(req.auth.vendorId, query);
+        return respondWithSuccess(res, 200, 'Vendor ledger fetched successfully',
+            res.paginate(result.items, result.total));
+    } catch (error) {
+        return fail(res, error);
+    }
 };
 
-
-
-export const updatePreferences = async (req,res) => {
+export const getHistory = async (req, res) => {
     try {
-        const mode=req.body?.payout_mode;
-        const cadence=req.body?.payout_cadence;
-        const minimum=req.body?.minimum_payout_minor;
-        if(mode===undefined&&cadence===undefined&&minimum===undefined) return respondWithError(res,400,'Provide payout_mode, payout_cadence, or minimum_payout_minor.',ERROR_CODES.VALIDATION_ERROR);
-        if(minimum!==undefined&&!Number.isSafeInteger(minimum)) return respondWithError(res,400,'minimum_payout_minor must be an integer.',ERROR_CODES.VALIDATION_ERROR);
-        const result=await savePayoutPreferences(vendorId(req),{payoutMode:mode,payoutCadence:cadence,minimumPayoutMinor:minimum});
-        return respondWithSuccess(res,200,'Payout preferences updated',result);
-    } catch(error) { return handleError(res,error); }
+        const query = validated(payoutListSchema, req.query);
+        const result = await Payout.history(req.auth.vendorId, query);
+        return respondWithSuccess(res, 200, 'Payout history fetched successfully',
+            res.paginate(result.items, result.total));
+    } catch (error) {
+        return fail(res, error);
+    }
 };
 
-
-
-export const finalizePayout = async (req,res) => {
+export const adminList = async (req, res) => {
     try {
-        const id=Number(req.params.payoutId);const otp=req.body?.otp;
-        if(!Number.isSafeInteger(id)||id<1||typeof otp!=='string'||!/^\d{4,10}$/.test(otp))
-            return respondWithError(res,400,'A valid payout ID and transfer OTP are required.',ERROR_CODES.VALIDATION_ERROR);
-        return respondWithSuccess(res,202,'Paystack transfer authorization submitted',await finalizePayoutTransfer(id,otp));
-    } catch(error) { return handleError(res,error); }
+        const query = validated(payoutListSchema, req.query);
+        const result = await Payout.adminList(query);
+        return respondWithSuccess(res, 200, 'Payouts fetched successfully',
+            res.paginate(result.items, result.total));
+    } catch (error) {
+        return fail(res, error);
+    }
 };
 
-export const retryPayout = async (req,res) => {
+export const retry = async (req, res) => {
     try {
-        const id=Number(req.params.payoutId);
-        if(!Number.isSafeInteger(id)||id<1)return respondWithError(res,400,'Invalid payout ID.',ERROR_CODES.VALIDATION_ERROR);
-        return respondWithSuccess(res,202,'Payout retry queued',await retryFailedPayout(id));
-    } catch(error) { return handleError(res,error); }
+        const id = Number(req.params.payoutId);
+        if (!Number.isSafeInteger(id) || id <= 0)
+            throw Object.assign(new Error('Invalid payout ID'), { status: 400 });
+        const payout = await Payout.retry(id, req.auth.userId);
+        return respondWithSuccess(res, 202, 'Payout retry submitted', payout);
+    } catch (error) {
+        return fail(res, error);
+    }
 };
 
-export const listAdminPayouts = async (req,res) => {
-    try { return respondWithSuccess(res,200,'Payouts fetched successfully',await listAllPayouts(req.query)); }
-    catch(error) { return handleError(res,error); }
-};
-
-export const updateVendorTaxRate = async (req,res) => {
+export const addTaxDeduction = async (req, res) => {
     try {
-        const vendorId=Number(req.params.vendorId);const taxRateBps=Number(req.body?.tax_rate_bps);
-        if(!Number.isInteger(vendorId)||vendorId<1) return respondWithError(res,400,'Invalid vendor ID.',ERROR_CODES.VALIDATION_ERROR);
-        return respondWithSuccess(res,200,'Vendor payout tax rate updated',await saveVendorTaxRate(vendorId,taxRateBps));
-    } catch(error) { return handleError(res,error); }
+        const vendorId = Number(req.params.vendorId);
+        if (!Number.isSafeInteger(vendorId) || vendorId <= 0)
+            throw Object.assign(new Error('Invalid vendor ID'), { status: 400 });
+        const { amount, note } = validated(taxDeductionSchema, req.body);
+        const summary = await Payout.addTaxDeduction(
+            vendorId,
+            minorUnits(amount),
+            note,
+            req.auth.userId
+        );
+        return respondWithSuccess(res, 201, 'Vendor tax debit recorded', summary);
+    } catch (error) {
+        return fail(res, error);
+    }
 };
-
-export default { listPayouts, getPayoutById, getSummary, createRecipient, requestPayout, updatePreferences, listAdminPayouts, updateVendorTaxRate, retryPayout, finalizePayout };

@@ -1,24 +1,18 @@
-import * as NotificationController from '#controllers/notification.controller.js';
 import * as BookingController from '#controllers/booking.controller.js';
 import * as SettingsController from "#controllers/settings.controller.js";
 import * as SupportTicketController from "#controllers/support.ticket.controller.js";
 import * as ProductController from "#controllers/product.controller.js";
-import * as ShippingRatesController from '#controllers/shipping-rates.controller.js';
 import * as VendorController from "#controllers/vendor.controller.js";
 import * as ShipmentController from "#controllers/shipment.controller.js";
 import * as ReturnController from "#controllers/return.controller.js";
 import * as PermissionsController from "#controllers/permission.controller.js";
 import * as PaymentController from "#controllers/payment.controller.js";
-import * as PayoutController from "#controllers/payout.controller.js";
 import * as AdminsController from "#controllers/admin.controller.js";
-import * as KYCController from '#controllers/kyc.controller.js';
 import * as TransactionHistoryController from "#controllers/transaction.history.controller.js";
 import * as AdminTypesController from "#controllers/admin.type.controller.js";
 import * as CouponsController from "#controllers/coupon.controller.js";
 import * as ServicesController from "#controllers/services.controller.js";
-import * as ServicePackagesController from "#controllers/service-packages.controller.js";
-import * as SubscriptionController from "#controllers/subscription.controller.js";
-import * as PromotionController from "#controllers/promotion.controller.js";
+import * as PayoutController from '#controllers/payout.controller.js';
 import pagination from "#middlewares/pagination.middleware.js";
 import { Router } from "express";
 import {
@@ -27,7 +21,6 @@ import {
     canDelete,
     canRead,
     canUpdate,
-    isVendor,
     isVendorAndVendorAdmin,
     requireCsrfProtection,
     requireRecentAuthentication,
@@ -37,20 +30,17 @@ const router = Router();
 // Resolve the vendor from the authenticated database principal for every route.
 router.use(authenticated, isVendorAndVendorAdmin, requireCsrfProtection);
 
-//notifications
-router.get('/notifications', NotificationController.getUserNotifications);
-router.get('/notifications/unread-count', NotificationController.getUnreadCount);
-router.get('/notifications/:notificationId', NotificationController.getUserNotification);
-router.patch('/notifications/mark-all-read', NotificationController.markAllAsRead);
-router.patch('/notifications/:notificationId/read', NotificationController.markAsRead);
-router.delete('/notifications/:notificationId', NotificationController.deleteNotification);
-
 //settings
 router.get("/settings", canRead('settings'), pagination, SettingsController.fetchSettings);
-router.patch("/settings/update", canUpdate('settings'), VendorController.updateVendorSettings);
+router.patch("/settings/update", canUpdate('settings'), SettingsController.upsertSettings);
+
+//support tickets
+router.post("/support-tickets/create", canCreate('support'), SupportTicketController.createSupportTicket);
+router.get("/support-tickets", canRead('support'), pagination, SupportTicketController.fetchSupportTickets);
+router.get("/support-tickets/:ticketId", canRead('support'), SupportTicketController.getSupportTicket);
+router.patch("/support-tickets/:ticketId/reply", canUpdate('support'), SupportTicketController.replyToSupportTicket);
 
 //products
-router.get('/shipping-categories', canRead('products'), ShippingRatesController.getShipbubblePackageCategories);
 router.get("/products/search", canRead('products'), pagination, ProductController.searchVendorProducts);
 router.delete("/product/delete/:id", canDelete('products'), ProductController.deleteProduct);
 router.post("/product/create", canCreate('products'), ProductController.createProduct);
@@ -62,38 +52,24 @@ router.patch("/product/update/:id", canUpdate('products'), ProductController.upd
 router.delete("/service/delete/:id", canDelete('services'), ServicesController.deleteService);
 router.post("/service/create", canCreate('services'), ServicesController.createService);
 router.get("/services", canRead('services'), pagination, ServicesController.fetchServices);
-router.get("/service/view/:id", canRead('services'), ServicesController.viewService);
+router.get("/service/:id", canRead('services'), ServicesController.viewService);
 router.patch("/service/update/:id", canUpdate('services'), ServicesController.updateService);
-router.get("/services/:serviceId/packages", canRead('services'), ServicePackagesController.list);
-router.post("/services/:serviceId/packages", canCreate('services'), ServicePackagesController.create);
-router.patch("/services/:serviceId/packages/:packageId", canUpdate('services'), ServicePackagesController.update);
-router.delete("/services/:serviceId/packages/:packageId", canDelete('services'), ServicePackagesController.remove);
-
-//subscriptions
-router.get("/subscriptions/me", SubscriptionController.getMe);
-router.post("/subscriptions/trial", SubscriptionController.startTrial);
-router.post("/subscriptions/checkout", SubscriptionController.checkout);
-router.post("/subscriptions/downgrade", SubscriptionController.downgrade);
-router.post("/subscriptions/cancel", SubscriptionController.cancel);
 
 //bookings (service permissions govern service fulfillment)
 router.get('/bookings', canRead('services'), BookingController.vendorList);
 router.get('/bookings/:bookingId', canRead('services'), BookingController.vendorView);
-router.patch('/bookings/:bookingId/decision', canUpdate('services'), BookingController.vendorDecision);
-router.patch('/bookings/:bookingId/reschedule', canUpdate('services'), BookingController.vendorProposeReschedule);
 router.patch('/bookings/:bookingId/status', canUpdate('services'), BookingController.vendorStatus);
 router.patch('/bookings/:bookingId/cancel', canUpdate('services'), BookingController.vendorCancel);
 
 //orders
 router.get("/orders", canRead('orders'), pagination, VendorController.getVendorOrders);
-router.get("/orders/:orderId", canRead('orders'), VendorController.getVendorOrderById);
+router.get("/orders/:orderId", canRead('orders'), pagination, VendorController.getVendorOrderById);
 router.get("/customer-orders", canRead('orders'), pagination, VendorController.getCustomerOrders);
 router.patch("/order/:orderId/update-status", canUpdate('orders'), VendorController.updateOrderStatus);
 router.patch("/order/:orderId/cancel", canUpdate('orders'), VendorController.cancelOrder);
-router.get("/order/history/:orderId", canRead('orders'), pagination, VendorController.getOrderHistory);
+router.get("/order/history/:customerId", canRead('orders'), pagination, VendorController.getOrderHistory);
 
 //shipments
-router.get("/orders/:orderId/shipments", canRead('shipments'), ShipmentController.getShipmentsByOrderId);
 router.post("/orders/:orderId/shipments", canCreate('shipments'), ShipmentController.createShipment);
 router.patch("/shipments/:shipmentId", canUpdate('shipments'), ShipmentController.updateShipment);
 router.get("/shipments/:shipmentId", canRead('shipments'), ShipmentController.getShipmentById);
@@ -115,12 +91,15 @@ router.get('/payment/verify/:reference', canRead('payments'), PaymentController.
 router.get('/transactions', canRead('transactions'), pagination, TransactionHistoryController.getVendorTransactions);
 
 //payouts
-router.get('/payouts/summary', canRead('transactions'), PayoutController.getSummary);
-router.get('/payouts', canRead('transactions'), pagination, PayoutController.listPayouts);
-router.get('/payouts/:payoutId', canRead('transactions'), PayoutController.getPayoutById);
-router.post('/payouts/recipient', PayoutController.createRecipient);
-router.post('/payouts/request', PayoutController.requestPayout);
-router.patch('/payouts/preferences', PayoutController.updatePreferences);
+router.get('/payouts', canRead('payouts'), PayoutController.getDashboard);
+router.get('/payouts/preferences', canRead('payouts'), PayoutController.getPreferences);
+router.get('/payouts/banks', canRead('payouts'), PayoutController.getBanks);
+router.post('/payouts/account/verify', canUpdate('payouts'), PayoutController.verifyBankAccount);
+router.patch('/payouts/preferences', canUpdate('payouts'), requireRecentAuthentication(), PayoutController.updatePreferences);
+router.put('/payouts/account', canUpdate('payouts'), requireRecentAuthentication(), PayoutController.setBankAccount);
+router.post('/payouts/request', canCreate('payouts'), requireRecentAuthentication(), PayoutController.requestPayout);
+router.get('/payouts/ledger', canRead('payouts'), pagination, PayoutController.getLedger);
+router.get('/payouts/history', canRead('payouts'), pagination, PayoutController.getHistory);
 
 //dashboard
 router.get("/dashboard/overview", canRead('dashboard'), VendorController.getDashboard);
@@ -149,17 +128,5 @@ router.get("/coupons", canRead('coupons'), pagination, CouponsController.fetchCo
 router.get("/coupons/view/:couponId", canRead('coupons'), CouponsController.fetchCouponById);
 router.patch("/coupons/update/:couponId", canUpdate('coupons'), CouponsController.updateCoupon);
 router.delete("/coupons/delete/:couponId", canDelete('coupons'), CouponsController.deleteCoupon);
-
-//promotions
-router.get('/promotions', canRead('promotions'), pagination, PromotionController.fetchVendorPromotions);
-router.get('/promotions/:promotionId', canRead('promotions'), PromotionController.fetchVendorPromotionById);
-router.post('/promotions/create', canCreate('promotions'), PromotionController.createPromotion);
-router.patch('/promotions/update/:promotionId', canUpdate('promotions'), PromotionController.updatePromotion);
-router.delete('/promotions/delete/:promotionId', canDelete('promotions'), PromotionController.deletePromotion);
-
-router.post('/kyc/identity', isVendor, KYCController.verifyIdentity);
-router.post('/kyc/business', isVendor, KYCController.verifyBusiness);
-router.post('/kyc/address', isVendor, KYCController.verifyAddress);
-router.get('/kyc/address/status', isVendor, KYCController.fetchAddressVerificationStatus);
 
 export default router;
