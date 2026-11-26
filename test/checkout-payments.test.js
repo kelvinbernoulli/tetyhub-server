@@ -233,6 +233,14 @@ test('paystack signature is checked on raw bytes and duplicate delivery is idemp
         if (prior === undefined) delete process.env.PAYSTACK_SECRET_KEY;
         else process.env.PAYSTACK_SECRET_KEY = prior;
     });
+    const priorGateway = Payment.gatewayApi;
+    Payment.gatewayApi = {
+        ...priorGateway,
+        verifyPaystack: async (reference) => ({ ...success, reference }),
+    };
+    t.after(() => {
+        Payment.gatewayApi = priorGateway;
+    });
     const body = Buffer.from(
         JSON.stringify({ event: 'charge.success', data: success })
     );

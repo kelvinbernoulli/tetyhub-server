@@ -44,14 +44,16 @@ const validatePrices = (value, helpers) => {
 const variantSchema = Joi.object({
     sku: Joi.string().trim().max(100).allow(null),
     barcode: Joi.string().trim().max(100).allow(null),
-    price: Joi.number().precision(2).min(0).max(MAX_PRICE).required(),
+    price: Joi.number().strict().precision(2).min(0).max(MAX_PRICE).required(),
     compare_at_price: Joi.number()
+        .strict()
         .precision(2)
         
         .min(0)
         .max(MAX_PRICE)
         .allow(null),
     cost_price: Joi.number()
+        .strict()
         .precision(2)
         
         .min(0)
@@ -170,6 +172,7 @@ export const createProductSchema = Joi.object({
 
     // Pricing
     price: Joi.number()
+        .strict()
         .precision(2)
         
         .min(0)
@@ -177,6 +180,7 @@ export const createProductSchema = Joi.object({
         .required()
         .label('Price'), // selling price
     compare_at_price: Joi.number()
+        .strict()
         .precision(2)
         
         .min(0)
@@ -184,6 +188,7 @@ export const createProductSchema = Joi.object({
         .optional()
         .label('Compare At Price'), // original price before discount
     cost_price: Joi.number()
+        .strict()
         .precision(2)
         
         .min(0)
@@ -191,6 +196,7 @@ export const createProductSchema = Joi.object({
         .optional()
         .label('Cost Price'), // vendor paid
     discount: Joi.number()
+        .strict()
         .precision(2)
         
         .min(0)
@@ -333,6 +339,7 @@ export const updateProductSchema = Joi.object({
         .label('Short Description'),
 
     price: Joi.number()
+        .strict()
         .precision(2)
         
         .min(0)
@@ -341,6 +348,7 @@ export const updateProductSchema = Joi.object({
         .label('Price'),
 
     compare_at_price: Joi.number()
+        .strict()
         .precision(2)
         
         .min(0)
@@ -350,6 +358,7 @@ export const updateProductSchema = Joi.object({
         .label('Compare At Price'),
 
     cost_price: Joi.number()
+        .strict()
         .precision(2)
         
         .min(0)
@@ -359,6 +368,7 @@ export const updateProductSchema = Joi.object({
         .label('Cost Price'),
 
     discount: Joi.number()
+        .strict()
         .precision(2)
         
         .min(0)

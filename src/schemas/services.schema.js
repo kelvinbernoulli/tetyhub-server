@@ -5,7 +5,7 @@ const MAX_INT = 2147483647;
 const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
 
 const identifier = Joi.number().integer().positive().max(MAX_INT);
-const money = Joi.number().positive().precision(2).max(99999999.99);
+const money = Joi.number().strict().positive().precision(2).max(99999999.99);
 
 // Matches the pattern in your product schema: validate shape via regex,
 // then re-check the decoded byte length so oversized payloads are rejected

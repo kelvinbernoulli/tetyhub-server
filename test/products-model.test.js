@@ -10,6 +10,11 @@ const input = {
     stock: 0,
     category_id: 1,
     currency_id: 1,
+    shipbubble_category_id: 1,
+    weight: 1,
+    length: 1,
+    width: 1,
+    height: 1,
 };
 const existing = {
     ...input,
@@ -29,6 +34,10 @@ function database(t, handle = () => undefined) {
             sql.startsWith('SELECT id FROM currencies')
         )
             return { rows: [{ id: 1 }] };
+        if (sql.startsWith('SELECT weight, dimensions, length, width, height'))
+            return {
+                rows: [{ weight: 1, length: 1, width: 1, height: 1 }],
+            };
         if (sql.startsWith('SELECT * FROM products'))
             return { rows: [existing] };
         if (sql.startsWith('INSERT INTO products'))

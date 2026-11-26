@@ -19,7 +19,8 @@ test('PostgreSQL migration, scoped reads and concurrent split-order delivery', {
             CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT);
             CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER, status TEXT, payment_status TEXT, updated_at TIMESTAMP);
             CREATE TABLE order_items (id INTEGER PRIMARY KEY, order_id INTEGER, vendor_id INTEGER, product_id INTEGER, quantity INTEGER, variant_id INTEGER);
-            CREATE TABLE shipments (id SERIAL PRIMARY KEY, order_id INTEGER, tracking_number TEXT, carrier TEXT, shipping_method TEXT,
+            CREATE TABLE shipbubble_rate_quotes (id SERIAL PRIMARY KEY, order_id INTEGER, vendor_id INTEGER, booking_status TEXT);
+            CREATE TABLE shipments (id SERIAL PRIMARY KEY, order_id INTEGER, tracking_number TEXT, tracking_url TEXT, waybill_document TEXT, carrier TEXT, shipping_method TEXT,
                 estimated_delivery TIMESTAMP, actual_delivery TIMESTAMP, shipping_cost DECIMAL DEFAULT 0, status TEXT DEFAULT 'pending', notes TEXT, created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP);
             CREATE UNIQUE INDEX shipments_order_id_key ON shipments(order_id);
             CREATE TABLE shipment_tracking_history (id SERIAL PRIMARY KEY, shipment_id INTEGER REFERENCES shipments(id), status TEXT, location TEXT, description TEXT, created_at TIMESTAMP DEFAULT NOW());

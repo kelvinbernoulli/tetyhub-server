@@ -46,13 +46,21 @@ test(
             CREATE TABLE orders (id SERIAL PRIMARY KEY, user_id INT REFERENCES users(id), currency_id INT);
             CREATE TABLE order_items (id SERIAL PRIMARY KEY, order_id INT REFERENCES orders(id), product_id INT REFERENCES products(id), service_id INT REFERENCES services(id));
             CREATE TABLE service_bookings (id SERIAL PRIMARY KEY, order_item_id INT UNIQUE REFERENCES order_items(id),
-                service_id INT NOT NULL REFERENCES services(id), scheduled_for TIMESTAMP NOT NULL, booking_status TEXT DEFAULT 'pending', additional_notes TEXT);
+                service_id INT NOT NULL REFERENCES services(id), scheduled_for TIMESTAMP NOT NULL, booking_status TEXT DEFAULT 'pending', additional_notes TEXT, note TEXT);
             CREATE TABLE payments (id SERIAL PRIMARY KEY, order_id INT REFERENCES orders(id), user_id INT REFERENCES users(id),
                 vendor_id INT REFERENCES vendors(id), gateway TEXT, gateway_ref TEXT UNIQUE, amount NUMERIC(10,2), currency_id INT,
                 status TEXT DEFAULT 'pending', meta TEXT, provider_ref TEXT UNIQUE, checkout_data TEXT, initializing_until TIMESTAMP,
                 paid_at TIMESTAMP, created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP);
             CREATE TABLE payment_events (id SERIAL PRIMARY KEY, payment_id INT REFERENCES payments(id), gateway TEXT,
                 gateway_event_id TEXT, event_type TEXT, UNIQUE(gateway,gateway_event_id));
+            CREATE TABLE vendor_ledger_entries (
+                id BIGSERIAL PRIMARY KEY, vendor_id INT NOT NULL REFERENCES vendors(id),
+                order_id INT REFERENCES orders(id), order_item_id INT REFERENCES order_items(id),
+                booking_id INT REFERENCES service_bookings(id), payout_id INT,
+                entry_type TEXT NOT NULL, amount_minor BIGINT NOT NULL,
+                currency CHAR(3) NOT NULL DEFAULT 'NGN', idempotency_key TEXT NOT NULL UNIQUE,
+                available_at TIMESTAMPTZ, metadata JSONB, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
             CREATE TABLE notifications (id SERIAL PRIMARY KEY, user_id INT, type TEXT, title TEXT, message TEXT, metadata TEXT);
             INSERT INTO users (email) VALUES ('one@example.com'),('two@example.com');
             INSERT INTO vendors DEFAULT VALUES;
@@ -101,6 +109,9 @@ test(
                 await client.query(
                     await migration('20261011110000_marketplace_commissions')
                 );
+                await client.query(
+                    await migration('20261011120000_provider_subscriptions')
+                );
             } finally {
                 client.release();
             }
@@ -124,7 +135,11 @@ test(
             );
             assert.equal(
                 results.filter((r) => r.status === 'fulfilled').length,
-                1
+                1,
+                results
+                    .filter((r) => r.status === 'rejected')
+                    .map((r) => r.reason?.stack ?? r.reason)
+                    .join('\n')
             );
             assert.equal(
                 results.filter(

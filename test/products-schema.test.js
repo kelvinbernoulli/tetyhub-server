@@ -12,6 +12,11 @@ const product = {
     stock: 0,
     category_id: 1,
     currency_id: 1,
+    shipbubble_category_id: 1,
+    weight: 1,
+    length: 1,
+    width: 1,
+    height: 1,
 };
 
 test('enabling variants requires at least one valid variant on create and update', () => {

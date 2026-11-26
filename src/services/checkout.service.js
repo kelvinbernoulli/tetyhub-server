@@ -1,6 +1,6 @@
 import { notifyOrder, notifyLowStock } from '#services/notifications.js';
 import { vendorSaleAllocations } from '#utils/commission.js';
-import { recordProductSale } from '#services/marketplace-ledger.js';
+import { recordOrderEarnings } from '#services/vendor-ledger.service.js';
 import {
     getProviderPlan,
     lockProviderEntitlements,
@@ -503,7 +503,7 @@ export async function processCheckout(user, data) {
                 'INSERT INTO checkout_notifications (order_id) VALUES ($1) ON CONFLICT (order_id) DO NOTHING',
                 [order.id]
             );
-            await recordProductSale(client, order.id);
+            await recordOrderEarnings(client, order.id);
         }
         await notifyOrder(client, order, order.status, { vendors: order.payment_status === 'paid' });
         return order;

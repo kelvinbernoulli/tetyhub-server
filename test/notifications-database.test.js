@@ -40,20 +40,23 @@ test(
             CREATE TABLE admin_permissions (admin_id INTEGER, admin_type_id INTEGER, status BOOLEAN, can_read BOOLEAN, expires_at TIMESTAMP);
             CREATE TABLE notifications (id SERIAL PRIMARY KEY, user_id INTEGER REFERENCES users(id), type TEXT, title TEXT, message TEXT, metadata TEXT, read_at TIMESTAMP, created_at TIMESTAMP DEFAULT NOW());
             CREATE TABLE orders (id SERIAL PRIMARY KEY, user_id INTEGER REFERENCES users(id), order_number TEXT, status TEXT DEFAULT 'pending', payment_status TEXT DEFAULT 'paid', updated_at TIMESTAMP);
-            CREATE TABLE order_items (id SERIAL PRIMARY KEY, order_id INTEGER, vendor_id INTEGER, quantity INTEGER, price NUMERIC);
+            CREATE TABLE products (id SERIAL PRIMARY KEY, name TEXT);
+            CREATE TABLE order_items (id SERIAL PRIMARY KEY, order_id INTEGER, vendor_id INTEGER, product_id INTEGER REFERENCES products(id), quantity INTEGER, price NUMERIC);
             CREATE TABLE vendor_order_fulfillments (id SERIAL PRIMARY KEY, order_id INTEGER, vendor_id INTEGER, status TEXT DEFAULT 'processing', updated_at TIMESTAMP, UNIQUE(order_id, vendor_id));
             CREATE TABLE order_status_history (order_id INTEGER, status TEXT, note TEXT, changed_by INTEGER);
             CREATE TABLE shipments (id SERIAL PRIMARY KEY, order_id INTEGER UNIQUE, tracking_number TEXT, carrier TEXT, shipping_method TEXT, estimated_delivery TIMESTAMP, shipping_cost NUMERIC, status TEXT, notes TEXT, updated_at TIMESTAMP);
+            CREATE TABLE shipbubble_rate_quotes (id SERIAL PRIMARY KEY, order_id INTEGER, vendor_id INTEGER, booking_status TEXT);
             CREATE TABLE shipment_tracking_history (id SERIAL PRIMARY KEY, shipment_id INTEGER, status TEXT, location TEXT, description TEXT);
             CREATE TABLE returns (id SERIAL PRIMARY KEY, order_id INTEGER, user_id INTEGER, vendor_id INTEGER, reason TEXT, description TEXT, return_type TEXT, refund_amount NUMERIC, status TEXT, updated_at TIMESTAMP);
             CREATE TABLE return_items (id SERIAL PRIMARY KEY, return_id INTEGER, order_item_id INTEGER, quantity INTEGER);
+            INSERT INTO products (name) VALUES ('Sample product');
             INSERT INTO users (role) VALUES ('customer'), ('vendor'), ('vendor_admin'), ('vendor_admin'), ('admin');
             INSERT INTO vendors (user_id) VALUES (2);
             INSERT INTO admins (user_id,vendor_id,scope,status) VALUES (3,1,'vendor','active'), (4,1,'vendor','suspended'), (5,NULL,'platform','active');
             INSERT INTO admin_types (slug,scope,status) VALUES ('orders','both',true), ('services','both',true), ('payments','platform',true);
             INSERT INTO admin_permissions VALUES (1,1,true,true,NULL),(2,1,true,true,NULL),(1,2,true,true,NOW()-INTERVAL '1 day'),(3,3,true,true,NULL);
             INSERT INTO orders (user_id, status) VALUES (1,'processing');
-            INSERT INTO order_items (order_id,vendor_id,quantity,price) VALUES (1,1,2,10);
+            INSERT INTO order_items (order_id,vendor_id,product_id,quantity,price) VALUES (1,1,1,2,10);
             INSERT INTO vendor_order_fulfillments (order_id,vendor_id,status) VALUES (1,1,'processing');
         `);
             await db.query(

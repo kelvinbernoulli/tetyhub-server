@@ -1,6 +1,20 @@
 import crypto from 'node:crypto';
 import Payment from '#models/payment.model.js';
 import Payout from '#models/payout.model.js';
+import SubscriptionService from '#services/subscription.service.js';
+
+export async function processPaystackEvent(event) {
+    if (event.event_type !== 'charge.success') return;
+    if (!event.reference)
+        throw new Error('Paystack charge event has no reference');
+    const verified = await Payment.gatewayApi.verifyPaystack(event.reference);
+    const isSubscriptionCharge = await SubscriptionService.handleChargeSuccess(
+        verified,
+        event.event_key
+    );
+    if (!isSubscriptionCharge)
+        await Payment.settle('paystack', verified, event.event_key);
+}
 
 export async function paystackWebhook(req, res) {
     const signature = req.headers['paystack-signature'] ?? req.headers['x-paystack-signature'];
@@ -23,7 +37,11 @@ export async function paystackWebhook(req, res) {
         const eventData = event.data;
         if (event.event === 'charge.success') {
             if (!eventData.id) return res.sendStatus(400);
-            await Payment.settle('paystack', eventData, `${event.event}:${eventData.id}`);
+            await processPaystackEvent({
+                event_type: event.event,
+                event_key: `${event.event}:${eventData.id}`,
+                reference: eventData.reference,
+            });
         } else if (['transfer.success', 'transfer.failed', 'transfer.reversed'].includes(event.event)) {
             const reference = eventData.reference;
             if (!reference) return res.sendStatus(400);

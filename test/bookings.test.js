@@ -116,6 +116,8 @@ function mockDb(t, override = () => undefined, subscriptionPlan = null) {
             return {
                 rows: Object.values(PLAN_DEFINITIONS).map((plan) => ({
                     plan: plan.code,
+                    version: 1,
+                    commission_percent: String(plan.commissionPercent),
                     priceNaira: plan.priceNaira,
                     commissionPercent: plan.commissionPercent,
                     activeServices: plan.activeServices,
@@ -133,7 +135,26 @@ function mockDb(t, override = () => undefined, subscriptionPlan = null) {
         )
             return { rows: [] };
         if (sql.startsWith('SELECT b.id'))
-            return { rows: [{ id: 9, service_id: 3 }] };
+            return {
+                rows: [
+                    {
+                        id: 9,
+                        vendor_id: 2,
+                        total: '20.50',
+                        currency: 'NGN',
+                    },
+                ],
+            };
+        if (sql.includes('FROM plan_versions'))
+            return {
+                rows: [
+                    {
+                        plan: 'FREE',
+                        version: 1,
+                        commission_percent: '10.00',
+                    },
+                ],
+            };
         if (
             sql.startsWith('SELECT b.*') ||
             sql.startsWith('SELECT * FROM service_bookings')

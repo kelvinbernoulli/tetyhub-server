@@ -4,6 +4,12 @@ import Joi from 'joi';
 const optionalText = Joi.string().trim().allow('', null);
 
 export const updateVendorSettingsSchema = Joi.object({
+    store_slug: Joi.string()
+        .trim()
+        .lowercase()
+        .pattern(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
+        .max(80)
+        .allow('', null),
     store_name: optionalText,
     description: optionalText,
     logo: Joi.string().pattern(base64ImagePattern).allow('', null),

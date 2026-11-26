@@ -165,6 +165,7 @@ const SELECT = `SELECT s.*, ${RELATED_FIELDS}
     LEFT JOIN childcategories cc ON cc.id = s.childcategory_id`;
 
 const PUBLIC_FROM = `services s JOIN vendors v ON v.id = s.vendor_id
+    LEFT JOIN vendor_settings vs ON vs.vendor_id = s.vendor_id
     JOIN currencies cur ON cur.id = s.currency_id
     LEFT JOIN categories c ON c.id = s.category_id
     LEFT JOIN subcategories sc ON sc.id = s.subcategory_id
@@ -174,6 +175,7 @@ const PUBLIC_SELECT = `SELECT s.id, s.vendor_id, s.slug,
     ${RELATED_FIELDS} FROM ${PUBLIC_FROM}`;
 const PUBLIC_WHERE = [
     "s.status = 'active'",
+    's.deleted_at IS NULL',
     "v.status = 'active'",
     'cur.status = true',
 ];

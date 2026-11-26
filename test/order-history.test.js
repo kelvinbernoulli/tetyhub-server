@@ -26,8 +26,11 @@ test('order reads use the product name column present in the schema', async (t) 
     await Order.fetchVendorOrders(3, {});
     for (const { sql } of calls) {
         assert.doesNotMatch(sql, /oi\.product_name/);
-        assert.match(sql, /'product_name', p\.name/);
     }
+    const orderReadQueries = calls.filter((call) => call.sql.includes('json_agg'));
+    assert.equal(orderReadQueries.length, 3);
+    for (const { sql } of orderReadQueries)
+        assert.match(sql, /'product_name', p\.name/);
 });
 
 test('history scopes customers and vendors separately and fails closed without scope', async (t) => {
@@ -93,9 +96,17 @@ test('customer delivery confirmation makes only a delivered vendor payout-eligib
             if (sql.startsWith('SELECT * FROM orders'))
                 return { rows: [{ id: 1, user_id: 2, payment_status: 'paid', currency_id: 1 }] };
             if (sql.startsWith('SELECT * FROM vendor_order_fulfillments'))
-                return { rows: [{ id: 8, status: 'delivered', payout_status: 'held' }] };
+                return { rows: [{ id: 8, status: 'delivered', payout_status: 'held', net_amount: '100.00' }] };
             if (sql.startsWith('SELECT id FROM shipments'))
                 return { rows: [{ id: 4 }] };
+            if (sql.includes('SUM(vendor_reserve_amount)'))
+                return { rows: [{ amount: '0.00' }] };
+            if (sql.includes('SUM(amount) FILTER'))
+                return { rows: [{ paid_or_due_amount: '0.00', payout_count: 0 }] };
+            if (sql.includes('FROM ledger_entries'))
+                return { rows: [{ balance: '100.00' }] };
+            if (sql.includes('FROM vendor_payouts'))
+                return { rows: [{ amount: '0.00' }] };
             if (sql.startsWith('SELECT 1 FROM returns'))
                 return { rows: [] };
             return { rows: [] };
@@ -109,8 +120,11 @@ test('customer delivery confirmation makes only a delivered vendor payout-eligib
         order_id: 1,
         vendor_id: 3,
         payout_status: 'eligible',
+        payout_amount: 100,
+        reserved_amount: 0,
     });
-    assert.ok(calls.some((call) => call.sql.includes("SET payout_status = 'eligible'")));
+    const payoutUpdate = calls.find((call) => call.sql.startsWith('UPDATE vendor_order_fulfillments'));
+    assert.equal(payoutUpdate.values[1], 'eligible');
     assert.ok(calls.some((call) => call.sql.includes("'payout_eligible'")));
     assert.ok(calls.some((call) => call.sql === 'COMMIT'));
 });
@@ -129,8 +143,12 @@ test('vendor history uses the authorized vendor rather than the session user', a
 
 test('return request records the customer actor before commit', async (t) => {
     const calls = database(t, sql => {
-        if (sql.startsWith('SELECT * FROM orders')) return { rows: [{ id: 1, status: 'delivered' }] };
-        if (sql.startsWith('SELECT * FROM order_items')) return { rows: [{ id: 9, vendor_id: 3, quantity: 1 }] };
+        if (sql.startsWith('SELECT * FROM orders')) return { rows: [{ id: 1, status: 'delivered', payment_status: 'paid', subtotal: '100.00', discount: '0.00', tax: '0.00', currency_id: 1 }] };
+        if (sql.startsWith('SELECT oi.*')) return { rows: [{ id: 9, product_id: 10, vendor_id: 3, quantity: 1, subtotal: '100.00', shipment_status: 'delivered', actual_delivery: new Date() }] };
+        if (sql.startsWith('SELECT id, gross_amount, net_amount')) return { rows: [{ id: 8, gross_amount: '100.00', net_amount: '90.00' }] };
+        if (sql.includes('SUM(ri.quantity)')) return { rows: [{ quantity: 0 }] };
+        if (sql.includes('SUM(vendor_reserve_amount)')) return { rows: [{ amount: '0.00' }] };
+        if (sql.includes('SUM(subtotal)')) return { rows: [{ subtotal: '100.00' }] };
         if (sql.startsWith('INSERT INTO returns')) return { rows: [{ id: 4, user_id: 2 }] };
         if (sql.startsWith('SELECT COUNT(DISTINCT vendor_id)')) return { rows: [{ count: 1 }] };
     });
@@ -144,8 +162,12 @@ test('return request records the customer actor before commit', async (t) => {
 
 test('a return from one vendor does not mark a multi-vendor order returned', async (t) => {
     const calls = database(t, sql => {
-        if (sql.startsWith('SELECT * FROM orders')) return { rows: [{ id: 1, status: 'delivered' }] };
-        if (sql.startsWith('SELECT * FROM order_items')) return { rows: [{ id: 9, vendor_id: 3, quantity: 1 }] };
+        if (sql.startsWith('SELECT * FROM orders')) return { rows: [{ id: 1, status: 'delivered', payment_status: 'paid', subtotal: '100.00', discount: '0.00', tax: '0.00', currency_id: 1 }] };
+        if (sql.startsWith('SELECT oi.*')) return { rows: [{ id: 9, product_id: 10, vendor_id: 3, quantity: 1, subtotal: '100.00', shipment_status: 'delivered', actual_delivery: new Date() }] };
+        if (sql.startsWith('SELECT id, gross_amount, net_amount')) return { rows: [{ id: 8, gross_amount: '100.00', net_amount: '90.00' }] };
+        if (sql.includes('SUM(ri.quantity)')) return { rows: [{ quantity: 0 }] };
+        if (sql.includes('SUM(vendor_reserve_amount)')) return { rows: [{ amount: '0.00' }] };
+        if (sql.includes('SUM(subtotal)')) return { rows: [{ subtotal: '100.00' }] };
         if (sql.startsWith('INSERT INTO returns')) return { rows: [{ id: 4, user_id: 2 }] };
         if (sql.startsWith('SELECT COUNT(DISTINCT vendor_id)')) return { rows: [{ count: 2 }] };
     });

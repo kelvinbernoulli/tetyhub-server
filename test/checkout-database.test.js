@@ -39,21 +39,31 @@ test(
             CREATE TABLE countries (id SERIAL PRIMARY KEY, name TEXT);
             CREATE TABLE products (id SERIAL PRIMARY KEY,vendor_id INT,currency_id INT,name TEXT,thumbnail TEXT,
                 price NUMERIC(10,2),stock INT,track_inventory BOOLEAN DEFAULT true,has_variants BOOLEAN DEFAULT false,
+                is_digital BOOLEAN DEFAULT false,weight NUMERIC(8,3),length NUMERIC(8,2),width NUMERIC(8,2),height NUMERIC(8,2),shipbubble_category_id INT,
                 free_shipping BOOLEAN DEFAULT true,status TEXT DEFAULT 'active',deleted_at TIMESTAMP,updated_at TIMESTAMP);
-            CREATE TABLE product_variants (id SERIAL PRIMARY KEY,product_id INT,price NUMERIC(10,2),stock INT,status TEXT,updated_at TIMESTAMP);
+            CREATE TABLE product_variants (id SERIAL PRIMARY KEY,product_id INT,price NUMERIC(10,2),stock INT,status TEXT,weight NUMERIC(8,3),dimensions JSONB,length NUMERIC(8,2),width NUMERIC(8,2),height NUMERIC(8,2),updated_at TIMESTAMP);
             CREATE TABLE carts (id SERIAL PRIMARY KEY,user_id INT UNIQUE,updated_at TIMESTAMP);
             CREATE TABLE cart_items (id SERIAL PRIMARY KEY,cart_id INT REFERENCES carts(id),product_id INT REFERENCES products(id),variant_id INT,quantity INT,price NUMERIC(10,2));
             CREATE TABLE coupons (id SERIAL PRIMARY KEY,vendor_id INT,product_id INT,service_id INT,code TEXT,type TEXT,value NUMERIC(10,2),
                 min_order NUMERIC(10,2) DEFAULT 0,max_discount NUMERIC(10,2),usage_limit INT,usage_count INT DEFAULT 0,status TEXT,expires_at TIMESTAMP);
-            CREATE TABLE orders (id SERIAL PRIMARY KEY,user_id INT REFERENCES users(id),currency_id INT,order_number TEXT UNIQUE NOT NULL,
-                subtotal NUMERIC(10,2),shipping_fee NUMERIC(10,2),discount NUMERIC(10,2),total NUMERIC(10,2),payment_method TEXT,note TEXT,
+            CREATE TABLE orders (id SERIAL PRIMARY KEY,user_id INT REFERENCES users(id),order_number TEXT UNIQUE NOT NULL,
+                subtotal NUMERIC(10,2),shipping_fee NUMERIC(10,2),discount NUMERIC(10,2),tax NUMERIC(10,2) DEFAULT 0,total NUMERIC(10,2),payment_method TEXT,note TEXT,
                 coupon_id INT,coupon_code TEXT,status TEXT DEFAULT 'pending',payment_status TEXT DEFAULT 'unpaid',updated_at TIMESTAMP,created_at TIMESTAMP DEFAULT NOW());
-            CREATE TABLE order_items (id SERIAL PRIMARY KEY,order_id INT REFERENCES orders(id),vendor_id INT NOT NULL,product_id INT,variant_id INT,quantity INT,price NUMERIC(10,2),subtotal NUMERIC(10,2));
+            CREATE TABLE order_items (id SERIAL PRIMARY KEY,order_id INT REFERENCES orders(id),vendor_id INT NOT NULL,product_id INT,variant_id INT,quantity INT,price NUMERIC(10,2),subtotal NUMERIC(10,2),shipbubble_category_id INT);
             CREATE TABLE shipments (id SERIAL PRIMARY KEY,order_id INT,vendor_id INT,status TEXT DEFAULT 'pending');
             CREATE UNIQUE INDEX shipments_order_id_key ON shipments(order_id);
             CREATE TABLE service_bookings (id SERIAL PRIMARY KEY);
+            CREATE TABLE shipbubble_rate_quotes (id UUID PRIMARY KEY DEFAULT gen_random_uuid(),order_id INT,booking_status TEXT DEFAULT 'unpaid',processing_until TIMESTAMP,booking_error TEXT);
             CREATE TABLE payments (id SERIAL PRIMARY KEY,order_id INT REFERENCES orders(id),user_id INT,gateway TEXT,gateway_ref TEXT UNIQUE,
                 amount NUMERIC(10,2),currency_id INT NOT NULL,status TEXT DEFAULT 'pending',meta TEXT,updated_at TIMESTAMP,created_at TIMESTAMP DEFAULT NOW());
+            CREATE TABLE vendor_ledger_entries (
+                id BIGSERIAL PRIMARY KEY, vendor_id INT NOT NULL REFERENCES vendors(id),
+                order_id INT REFERENCES orders(id), order_item_id INT REFERENCES order_items(id),
+                booking_id INT REFERENCES service_bookings(id), payout_id INT,
+                entry_type TEXT NOT NULL, amount_minor BIGINT NOT NULL,
+                currency CHAR(3) NOT NULL DEFAULT 'NGN', idempotency_key TEXT NOT NULL UNIQUE,
+                available_at TIMESTAMPTZ, metadata JSONB, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
             CREATE TABLE shipping_addresses (id SERIAL PRIMARY KEY,order_id INT NOT NULL REFERENCES orders(id),user_id INT NOT NULL,
                 firstname TEXT,lastname TEXT,phone_one TEXT,phone_two TEXT,address TEXT,city TEXT,state TEXT,country_id INT NOT NULL,zip_code TEXT);
         `);
@@ -87,12 +97,22 @@ test(
             await db.query(
                 await readFile(
                     new URL(
+                        '../prisma/migrations/20261011120000_provider_subscriptions/migration.sql',
+                        import.meta.url
+                    ),
+                    'utf8'
+                )
+            );
+            await db.query(
+                await readFile(
+                    new URL(
                         '../prisma/migrations/20261124000000_checkout_expiration_timestamptz/migration.sql',
                         import.meta.url
                     ),
                     'utf8'
                 )
             );
+            await db.query("ALTER TABLE orders ALTER COLUMN reservation_expires_at SET DEFAULT (NOW() + INTERVAL '30 minutes')");
             await db.query(`INSERT INTO users(firstname,email) VALUES ('A','a@example.com'),('B','b@example.com');
             INSERT INTO vendors DEFAULT VALUES;
             INSERT INTO currencies(code) VALUES ('NGN');
@@ -137,7 +157,10 @@ test(
             assert.equal(
                 competing.filter((x) => x.status === 'fulfilled').length,
                 1,
-                'only one buyer can purchase the last item'
+                `only one buyer can purchase the last item: ${competing
+                    .filter((x) => x.status === 'rejected')
+                    .map((x) => x.reason?.stack ?? x.reason)
+                    .join('\n') || JSON.stringify(competing)}`
             );
             assert.equal(
                 (await db.query('SELECT stock FROM products WHERE id = 1'))
@@ -151,6 +174,7 @@ test(
             );
             const winner = competing.findIndex((x) => x.status === 'fulfilled');
             const result = competing[winner].value;
+            assert.ok(result.payment, result.payment_error ?? 'Checkout did not initialize a payment');
             const retries = await Promise.all([
                 processCheckout({ id: winner + 1 }, payloads[winner]),
                 processCheckout({ id: winner + 1 }, payloads[winner]),

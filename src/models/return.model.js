@@ -269,6 +269,25 @@ class Return {
                 );
             }
             await notifyReturn(client, returnRequest, 'pending', { vendors: true });
+            const vendorCount = await client.query(
+                `SELECT COUNT(DISTINCT vendor_id)::int AS count
+                 FROM order_items
+                 WHERE order_id = $1 AND product_id IS NOT NULL`,
+                [orderId]
+            );
+            if (Number(vendorCount.rows[0]?.count) === 1) {
+                await client.query(
+                    `UPDATE orders SET status = 'returned', updated_at = NOW()
+                     WHERE id = $1`,
+                    [orderId]
+                );
+                await client.query(
+                    `INSERT INTO order_status_history
+                     (order_id, status, note, changed_by)
+                     VALUES ($1, 'returned', 'Return requested', $2)`,
+                    [orderId, userId]
+                );
+            }
             await client.query('COMMIT');
             return toCustomerReturnDTO({ ...returnRequest, items: requestedItems.map(({ item, requested }) => ({
                 order_item_id: item.id,
@@ -310,7 +329,7 @@ class Return {
                 scope = ' AND vendor_id = $2';
             }
             const rows = await client.query(
-                `SELECT * FROM returns WHERE id = $1${scope} FOR UPDATE`, values
+                `SELECT r.* FROM returns r WHERE r.id = $1${scope} FOR UPDATE`, values
             );
             returnRequest = rows.rows[0];
             if (!returnRequest) {
